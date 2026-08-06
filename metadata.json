@@ -1,0 +1,6 @@
+{
+  "name": "Island Hub + Void Horde",
+  "description": "A browser-based multiplayer social island hub and co-op horde-defense game.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
