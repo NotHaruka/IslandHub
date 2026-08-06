@@ -2,11 +2,12 @@ import React, { useRef, useState, useEffect } from 'react';
 
 interface Props {
   onMove: (vx: number, vy: number) => void;
+  onEnd?: () => void;
   onShootToggle?: (shooting: boolean, aimAngle: number) => void;
   showShootButton?: boolean;
 }
 
-export const MobileJoystick: React.FC<Props> = ({ onMove, onShootToggle, showShootButton }) => {
+export const MobileJoystick: React.FC<Props> = ({ onMove, onEnd, onShootToggle, showShootButton }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const shootRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +43,7 @@ export const MobileJoystick: React.FC<Props> = ({ onMove, onShootToggle, showSho
     setActive(false);
     setKnobPos({ x: 0, y: 0 });
     onMove(0, 0);
+    onEnd?.();
   };
 
   return (

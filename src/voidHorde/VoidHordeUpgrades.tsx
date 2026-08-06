@@ -1,10 +1,11 @@
-import React from 'react';
-import { Shield, Zap, Bot } from 'lucide-react';
+import React, { useState } from 'react';
+import { Shield, Zap, Bot, CheckCircle2 } from 'lucide-react';
 import { soundManager } from '../audio/soundManager';
 
 interface Props {
   onSelectUpgrade: (upgradeId: string) => void;
   timer: number;
+  hasSelected?: boolean;
 }
 
 const renderUpgradeIcon = (id: string) => {
@@ -34,8 +35,14 @@ const UPGRADE_OPTIONS = [
   },
 ];
 
-export const VoidHordeUpgrades: React.FC<Props> = ({ onSelectUpgrade, timer }) => {
+export const VoidHordeUpgrades: React.FC<Props> = ({ onSelectUpgrade, timer, hasSelected }) => {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const isAlreadySelected = hasSelected || selectedId !== null;
+
   const handleSelect = (id: string) => {
+    if (isAlreadySelected) return;
+    setSelectedId(id);
     soundManager.playUpgradeBuy();
     onSelectUpgrade(id);
   };
@@ -50,27 +57,55 @@ export const VoidHordeUpgrades: React.FC<Props> = ({ onSelectUpgrade, timer }) =
           <h2 className="text-2xl font-black bg-gradient-to-r from-cyan-300 to-amber-300 bg-clip-text text-transparent">
             SELECT TACTICAL UPGRADE
           </h2>
-          <p className="text-xs text-slate-400">Choose one tactical enhancement before the next Void wave!</p>
+          <p className="text-xs text-slate-400">
+            {isAlreadySelected ? 'Upgrade confirmed! Preparing for next wave...' : 'Choose one tactical enhancement before the next Void wave!'}
+          </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {UPGRADE_OPTIONS.map((opt) => (
-            <button
-              key={opt.id}
-              onClick={() => handleSelect(opt.id)}
-              className={`p-5 rounded-2xl border bg-gradient-to-br ${opt.color} text-left flex flex-col justify-between gap-4 transition transform hover:scale-105 shadow-xl group`}
-            >
-              <div className="space-y-2">
-                <div className="p-2.5 bg-black/40 rounded-xl inline-block">{renderUpgradeIcon(opt.id)}</div>
-                <h3 className="font-bold text-sm text-slate-100 group-hover:text-cyan-300">{opt.title}</h3>
-                <p className="text-xs text-slate-300 leading-relaxed">{opt.description}</p>
-              </div>
+          {UPGRADE_OPTIONS.map((opt) => {
+            const isThisChosen = selectedId === opt.id;
+            return (
+              <button
+                key={opt.id}
+                onClick={() => handleSelect(opt.id)}
+                disabled={isAlreadySelected}
+                className={`p-5 rounded-2xl border bg-gradient-to-br ${opt.color} text-left flex flex-col justify-between gap-4 transition shadow-xl ${
+                  isAlreadySelected
+                    ? isThisChosen
+                      ? 'ring-2 ring-emerald-400 scale-105'
+                      : 'opacity-50 cursor-not-allowed'
+                    : 'transform hover:scale-105 cursor-pointer group'
+                }`}
+              >
+                <div className="space-y-2">
+                  <div className="p-2.5 bg-black/40 rounded-xl inline-block">{renderUpgradeIcon(opt.id)}</div>
+                  <h3 className="font-bold text-sm text-slate-100 group-hover:text-cyan-300">{opt.title}</h3>
+                  <p className="text-xs text-slate-300 leading-relaxed">{opt.description}</p>
+                </div>
 
-              <div className="py-2 px-3 bg-white/10 rounded-xl text-center text-xs font-black tracking-wider uppercase group-hover:bg-cyan-400 group-hover:text-slate-950 transition">
-                EQUIP UPGRADE
-              </div>
-            </button>
-          ))}
+                <div
+                  className={`py-2 px-3 rounded-xl text-center text-xs font-black tracking-wider uppercase transition ${
+                    isThisChosen
+                      ? 'bg-emerald-500 text-slate-950 flex items-center justify-center gap-1'
+                      : isAlreadySelected
+                      ? 'bg-slate-800 text-slate-500'
+                      : 'bg-white/10 group-hover:bg-cyan-400 group-hover:text-slate-950'
+                  }`}
+                >
+                  {isThisChosen ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5" /> EQUIPPED
+                    </>
+                  ) : isAlreadySelected ? (
+                    'SELECTION LOCKED'
+                  ) : (
+                    'EQUIP UPGRADE'
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

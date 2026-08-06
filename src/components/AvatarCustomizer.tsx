@@ -1,12 +1,11 @@
-import React, { useEffect, useRef } from 'react';
-import { IslandPlayer, PlayerAvatar } from '../types/island';
-import { User, Sparkles, Shield, Crown } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { PlayerAvatar } from '../types/island';
+import { User } from 'lucide-react';
 
 interface Props {
   username: string;
   avatar: PlayerAvatar;
-  onChangeUsername: (name: string) => void;
-  onChangeAvatar: (avatar: PlayerAvatar) => void;
+  onSave: (username: string, avatar: PlayerAvatar) => void;
   onClose: () => void;
 }
 
@@ -18,10 +17,11 @@ const ACCESSORIES: PlayerAvatar['accessory'][] = ['none', 'cape', 'aura', 'wings
 export const AvatarCustomizer: React.FC<Props> = ({
   username,
   avatar,
-  onChangeUsername,
-  onChangeAvatar,
+  onSave,
   onClose,
 }) => {
+  const [currentUsername, setCurrentUsername] = useState(username);
+  const [currentAvatar, setCurrentAvatar] = useState<PlayerAvatar>(avatar);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -41,9 +41,9 @@ export const AvatarCustomizer: React.FC<Props> = ({
       const cy = canvas.height / 2 + Math.sin(t) * 3;
 
       // Aura Effect
-      if (avatar.accessory === 'aura') {
+      if (currentAvatar.accessory === 'aura') {
         const auraGrad = ctx.createRadialGradient(cx, cy, 10, cx, cy, 38 + Math.sin(t * 2) * 4);
-        auraGrad.addColorStop(0, `${avatar.bodyColor}88`);
+        auraGrad.addColorStop(0, `${currentAvatar.bodyColor}88`);
         auraGrad.addColorStop(1, 'transparent');
         ctx.fillStyle = auraGrad;
         ctx.beginPath();
@@ -52,13 +52,13 @@ export const AvatarCustomizer: React.FC<Props> = ({
       }
 
       // Wings / Cape
-      if (avatar.accessory === 'wings') {
+      if (currentAvatar.accessory === 'wings') {
         ctx.fillStyle = '#cbd5e1';
         ctx.beginPath();
         ctx.ellipse(cx - 22, cy - 5, 18, 8, -Math.PI / 6 + Math.sin(t) * 0.1, 0, Math.PI * 2);
         ctx.ellipse(cx + 22, cy - 5, 18, 8, Math.PI / 6 - Math.sin(t) * 0.1, 0, Math.PI * 2);
         ctx.fill();
-      } else if (avatar.accessory === 'cape') {
+      } else if (currentAvatar.accessory === 'cape') {
         ctx.fillStyle = '#dc2626';
         ctx.fillRect(cx - 14, cy, 28, 22);
       }
@@ -70,13 +70,13 @@ export const AvatarCustomizer: React.FC<Props> = ({
       ctx.fill();
 
       // Body
-      ctx.fillStyle = avatar.bodyColor;
+      ctx.fillStyle = currentAvatar.bodyColor;
       ctx.beginPath();
       ctx.arc(cx, cy, 18, 0, Math.PI * 2);
       ctx.fill();
 
       // Skin Tone Details
-      ctx.fillStyle = avatar.skin === 'cyber' ? '#38bdf8' : avatar.skin === 'alien' ? '#84cc16' : '#fde047';
+      ctx.fillStyle = currentAvatar.skin === 'cyber' ? '#38bdf8' : currentAvatar.skin === 'alien' ? '#84cc16' : '#fde047';
       ctx.beginPath();
       ctx.arc(cx, cy - 2, 10, 0, Math.PI * 2);
       ctx.fill();
@@ -89,7 +89,7 @@ export const AvatarCustomizer: React.FC<Props> = ({
       ctx.fill();
 
       // Hat
-      if (avatar.hat === 'crown') {
+      if (currentAvatar.hat === 'crown') {
         ctx.fillStyle = '#eab308';
         ctx.beginPath();
         ctx.moveTo(cx - 10, cy - 12);
@@ -101,15 +101,15 @@ export const AvatarCustomizer: React.FC<Props> = ({
         ctx.lineTo(cx + 10, cy - 12);
         ctx.closePath();
         ctx.fill();
-      } else if (avatar.hat === 'visor') {
+      } else if (currentAvatar.hat === 'visor') {
         ctx.fillStyle = '#0284c7';
         ctx.fillRect(cx - 12, cy - 6, 24, 7);
-      } else if (avatar.hat === 'helmet') {
+      } else if (currentAvatar.hat === 'helmet') {
         ctx.fillStyle = '#475569';
         ctx.beginPath();
         ctx.arc(cx, cy - 6, 15, Math.PI, 0);
         ctx.fill();
-      } else if (avatar.hat === 'headphones') {
+      } else if (currentAvatar.hat === 'headphones') {
         ctx.strokeStyle = '#ec4899';
         ctx.lineWidth = 4;
         ctx.beginPath();
@@ -125,7 +125,12 @@ export const AvatarCustomizer: React.FC<Props> = ({
 
     render();
     return () => cancelAnimationFrame(animId);
-  }, [avatar]);
+  }, [currentAvatar]);
+
+  const handleSaveAndClose = () => {
+    onSave(currentUsername.trim() || 'Explorer', currentAvatar);
+    onClose();
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
@@ -136,8 +141,8 @@ export const AvatarCustomizer: React.FC<Props> = ({
             <h2 className="text-sm font-bold tracking-wide uppercase">Explorer Profile</h2>
           </div>
           <button
-            onClick={onClose}
-            className="text-slate-300 hover:text-white text-xs font-semibold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg transition cursor-pointer"
+            onClick={handleSaveAndClose}
+            className="text-slate-300 hover:text-white text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg transition cursor-pointer"
           >
             Save & Close
           </button>
@@ -148,8 +153,8 @@ export const AvatarCustomizer: React.FC<Props> = ({
           <canvas ref={canvasRef} width={120} height={120} className="rounded-lg" />
           <input
             type="text"
-            value={username}
-            onChange={(e) => onChangeUsername(e.target.value.substring(0, 16))}
+            value={currentUsername}
+            onChange={(e) => setCurrentUsername(e.target.value.substring(0, 16))}
             placeholder="Enter Name..."
             className="w-full text-center bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-400 text-slate-100"
           />
@@ -166,9 +171,9 @@ export const AvatarCustomizer: React.FC<Props> = ({
               {BODY_COLORS.map((c) => (
                 <button
                   key={c}
-                  onClick={() => onChangeAvatar({ ...avatar, bodyColor: c })}
+                  onClick={() => setCurrentAvatar({ ...currentAvatar, bodyColor: c })}
                   className={`w-6 h-6 rounded-full transition transform hover:scale-110 cursor-pointer ${
-                    avatar.bodyColor === c ? 'ring-2 ring-emerald-400 scale-110' : ''
+                    currentAvatar.bodyColor === c ? 'ring-2 ring-emerald-400 scale-110' : ''
                   }`}
                   style={{ backgroundColor: c }}
                 />
@@ -185,9 +190,9 @@ export const AvatarCustomizer: React.FC<Props> = ({
               {HATS.map((h) => (
                 <button
                   key={h}
-                  onClick={() => onChangeAvatar({ ...avatar, hat: h })}
+                  onClick={() => setCurrentAvatar({ ...currentAvatar, hat: h })}
                   className={`py-1.5 px-2 text-xs font-medium rounded-lg border capitalize transition cursor-pointer ${
-                    avatar.hat === h
+                    currentAvatar.hat === h
                       ? 'bg-emerald-500/10 border-emerald-400 text-emerald-300'
                       : 'bg-[#080b12] border-slate-800 text-slate-400 hover:bg-slate-800'
                   }`}
@@ -207,9 +212,9 @@ export const AvatarCustomizer: React.FC<Props> = ({
               {SKINS.map((s) => (
                 <button
                   key={s}
-                  onClick={() => onChangeAvatar({ ...avatar, skin: s })}
+                  onClick={() => setCurrentAvatar({ ...currentAvatar, skin: s })}
                   className={`py-1.5 px-2 text-xs font-medium rounded-lg border capitalize transition cursor-pointer ${
-                    avatar.skin === s
+                    currentAvatar.skin === s
                       ? 'bg-emerald-500/10 border-emerald-400 text-emerald-300'
                       : 'bg-[#080b12] border-slate-800 text-slate-400 hover:bg-slate-800'
                   }`}
@@ -229,9 +234,9 @@ export const AvatarCustomizer: React.FC<Props> = ({
               {ACCESSORIES.map((a) => (
                 <button
                   key={a}
-                  onClick={() => onChangeAvatar({ ...avatar, accessory: a })}
+                  onClick={() => setCurrentAvatar({ ...currentAvatar, accessory: a })}
                   className={`py-1.5 px-2 text-xs font-medium rounded-lg border capitalize transition cursor-pointer ${
-                    avatar.accessory === a
+                    currentAvatar.accessory === a
                       ? 'bg-emerald-500/10 border-emerald-400 text-emerald-300'
                       : 'bg-[#080b12] border-slate-800 text-slate-400 hover:bg-slate-800'
                   }`}

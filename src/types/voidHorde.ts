@@ -54,6 +54,7 @@ export interface PlayerEntity {
   color: string;
   turretUnlocked?: boolean;
   turretAngle?: number;
+  hasSelectedUpgrade?: boolean;
 }
 
 export interface CoreEntity {

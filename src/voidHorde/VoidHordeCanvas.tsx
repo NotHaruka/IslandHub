@@ -290,7 +290,25 @@ export const VoidHordeCanvas: React.FC<Props> = ({
 
       // 5. Render Players
       (Object.values(vhState.players) as PlayerEntity[]).forEach((player) => {
-        if (!player.isAlive) return;
+        if (!player.isAlive) {
+          ctx.save();
+          ctx.translate(player.x, player.y);
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.35)';
+          ctx.beginPath();
+          ctx.arc(0, 0, 18, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#ef4444';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+
+          ctx.fillStyle = '#f87171';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(`${player.username} (FALLEN)`, 0, -26);
+          ctx.restore();
+          return;
+        }
 
         ctx.save();
         ctx.translate(player.x, player.y);

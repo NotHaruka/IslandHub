@@ -1,0 +1,40 @@
+import { WeaponType, WeaponStats } from '../types/voidHorde';
+
+export const WEAPON_DEFS: Record<WeaponType, WeaponStats> = {
+  plasma: {
+    id: 'plasma',
+    name: 'Plasma Blaster',
+    description: 'Rapid-fire energy blaster with high accuracy and reliable single-target DPS.',
+    damage: 35,
+    fireRate: 8,
+    projectileSpeed: 700,
+    spread: 0.08,
+    pellets: 1,
+    color: '#38bdf8',
+    energyCost: 0,
+  },
+  scatter: {
+    id: 'scatter',
+    name: 'Scatter Cannon',
+    description: 'Fires 5 energy pellets in a wide spread for close-range devastation.',
+    damage: 22,
+    fireRate: 3.5,
+    projectileSpeed: 550,
+    spread: 0.35,
+    pellets: 5,
+    color: '#fbbf24',
+    energyCost: 0,
+  },
+  railgun: {
+    id: 'railgun',
+    name: 'Void Railgun',
+    description: 'Fires heavy piercing beams that cut through enemy lines.',
+    damage: 180,
+    fireRate: 1.8,
+    projectileSpeed: 1100,
+    spread: 0.01,
+    pellets: 1,
+    color: '#c084fc',
+    energyCost: 0,
+  },
+};

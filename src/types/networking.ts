@@ -5,6 +5,7 @@ import { VoidHordeState, WeaponType } from './voidHorde';
 // Client -> Server messages
 export type ClientMessage =
   | { type: 'join_island'; username: string; avatar: IslandPlayer['avatar'] }
+  | { type: 'update_profile'; username: string; avatar: IslandPlayer['avatar'] }
   | { type: 'move_island'; x: number; y: number; vx: number; vy: number; facing: IslandPlayer['facing'] }
   | { type: 'chat_msg'; text: string; channel: 'nearby' | 'global' }
   | { type: 'emote'; emote: EmoteType }

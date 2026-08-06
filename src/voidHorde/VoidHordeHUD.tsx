@@ -61,7 +61,12 @@ export const VoidHordeHUD: React.FC<Props> = ({ vhState, localPlayerId }) => {
           </div>
 
           {/* Status Warning Banner */}
-          {vhState.waveState === 'preparing' && (
+          {localPlayer && !localPlayer.isAlive && (
+            <div className="bg-rose-950/80 border border-rose-800 text-rose-200 text-center text-xs font-bold py-1.5 px-3 rounded-lg flex items-center justify-center gap-2 animate-pulse">
+              <Skull className="w-4 h-4 text-rose-400" /> YOU WERE ELIMINATED — SPECTATING SQUAD
+            </div>
+          )}
+          {vhState.waveState === 'preparing' && localPlayer?.isAlive && (
             <div className="text-center text-xs font-bold text-amber-300 animate-pulse">
               WAVE COMMENCING IN {Math.ceil(vhState.waveTimer)}S — HOLD DEFENSIVE PERIMETER
             </div>

@@ -4,45 +4,7 @@ import { IslandPlayer, ChatMessage, EmoteType } from '../types/island';
 import { GameRoom, RoomPlayer } from '../types/gameHub';
 import { VoidHordeState, EnemyEntity, ProjectileEntity, PlayerEntity, WeaponType, WeaponStats } from '../types/voidHorde';
 import { ClientMessage, ServerMessage } from '../types/networking';
-
-const WEAPON_DEFS: Record<WeaponType, WeaponStats> = {
-  plasma: {
-    id: 'plasma',
-    name: 'Plasma Blaster',
-    description: 'Rapid-fire energy blaster with high accuracy.',
-    damage: 35,
-    fireRate: 8, // shots/sec
-    projectileSpeed: 700,
-    spread: 0.08,
-    pellets: 1,
-    color: '#38bdf8',
-    energyCost: 0,
-  },
-  scatter: {
-    id: 'scatter',
-    name: 'Scatter Pulse Cannon',
-    description: 'Fires 5 energy pellets in a wide spread for close-range devastation.',
-    damage: 22,
-    fireRate: 3.5,
-    projectileSpeed: 550,
-    spread: 0.35,
-    pellets: 5,
-    color: '#fbbf24',
-    energyCost: 0,
-  },
-  railgun: {
-    id: 'railgun',
-    name: 'Void Railgun',
-    description: 'Fires heavy piercing beams that cut through enemy lines.',
-    damage: 180,
-    fireRate: 1.8,
-    projectileSpeed: 1100,
-    spread: 0.01,
-    pellets: 1,
-    color: '#c084fc',
-    energyCost: 0,
-  },
-};
+import { WEAPON_DEFS } from '../config/weapons';
 
 interface ClientConnection {
   ws: WebSocket;
@@ -272,6 +234,27 @@ export function setupMultiplayerServer(server: HttpServer) {
             break;
           }
 
+          case 'update_profile': {
+            clientConn.username = msg.username || clientConn.username;
+            const player = islandPlayers.get(clientConn.playerId);
+            if (player) {
+              player.username = clientConn.username;
+              player.avatar = msg.avatar;
+            }
+            if (clientConn.roomId) {
+              const room = rooms.get(clientConn.roomId);
+              if (room) {
+                const rp = room.players.find((p) => p.id === clientConn.playerId);
+                if (rp) {
+                  rp.username = clientConn.username;
+                  rp.avatarColor = msg.avatar.bodyColor;
+                  broadcastRoom(room.id, { type: 'room_updated', room });
+                }
+              }
+            }
+            break;
+          }
+
           case 'move_island': {
             const player = islandPlayers.get(clientConn.playerId);
             if (player) {
@@ -449,7 +432,16 @@ export function setupMultiplayerServer(server: HttpServer) {
           case 'start_game': {
             if (!clientConn.roomId) return;
             const room = rooms.get(clientConn.roomId);
-            if (!room || room.hostId !== clientConn.playerId) return;
+            if (!room) return;
+            if (room.hostId !== clientConn.playerId) {
+              sendTo(ws, { type: 'error', message: 'Only the squad host can launch the match.' });
+              return;
+            }
+            const unreadyPlayers = room.players.filter((p) => !p.isReady);
+            if (unreadyPlayers.length > 0) {
+              sendTo(ws, { type: 'error', message: `Cannot launch match: ${unreadyPlayers.map((p) => p.username).join(', ')} not ready.` });
+              return;
+            }
 
             startMatchInRoom(room);
             break;
@@ -508,7 +500,8 @@ export function setupMultiplayerServer(server: HttpServer) {
             if (!vhState || vhState.waveState !== 'intermission') return;
 
             const p = vhState.players[clientConn.playerId];
-            if (p) {
+            if (p && !p.hasSelectedUpgrade) {
+              p.hasSelectedUpgrade = true;
               if (msg.upgradeId === 'core_shield') {
                 vhState.core.maxHp += 200;
                 vhState.core.hp = Math.min(vhState.core.maxHp, vhState.core.hp + 300);
@@ -684,6 +677,9 @@ export function setupMultiplayerServer(server: HttpServer) {
         if (vhState.enemies.length === 0 && vhState.waveTimer <= 0) {
           vhState.waveState = 'intermission';
           vhState.waveTimer = 10; // 10s intermission upgrade choice
+          Object.values(vhState.players).forEach((p) => {
+            p.hasSelectedUpgrade = false;
+          });
           broadcastRoom(roomId, { type: 'vh_event', eventType: 'upgrade_phase' });
         }
       }

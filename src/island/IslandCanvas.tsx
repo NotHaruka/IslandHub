@@ -94,7 +94,7 @@ export const IslandCanvas: React.FC<Props> = ({
 
         // Check Arcade Portal Proximity (Arcade Portal at x: 700, y: 220)
         const portalDist = Math.hypot(nextX - 700, nextY - 220);
-        if (portalDist < 70 && (keys['KeyE'] || keys['Space'])) {
+        if (portalDist < 120 && (keys['KeyE'] || keys['Space'])) {
           onInteractPortalRef.current();
         }
       }
@@ -388,14 +388,21 @@ export const IslandCanvas: React.FC<Props> = ({
   }, [localPlayerId, players]);
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Check if player is near portal OR clicked in top area (portal location)
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
     const localP = players.find((p) => p.id === localPlayerId);
     const px = localP ? localP.x : posRef.current.x;
     const py = localP ? localP.y : posRef.current.y;
-    const portalDist = Math.hypot(px - 700, py - 220);
 
-    // If nearby or clicked anywhere in upper screen, enter portal
-    if (portalDist < 180 || e.clientY < window.innerHeight * 0.4) {
+    const worldX = e.clientX - canvas.width / 2 + px;
+    const worldY = e.clientY - canvas.height / 2 + py;
+
+    const clickToPortalDist = Math.hypot(worldX - 700, worldY - 220);
+    const playerToPortalDist = Math.hypot(px - 700, py - 220);
+
+    // If clicking directly on portal structure or standing close
+    if (clickToPortalDist < 140 || playerToPortalDist < 120) {
       onInteractPortal();
     }
   };

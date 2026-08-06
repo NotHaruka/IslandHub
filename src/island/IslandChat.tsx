@@ -5,7 +5,8 @@ import { soundManager } from '../audio/soundManager';
 
 interface Props {
   messages: ChatMessage[];
-  onSendChat: (text: string, channel: 'nearby' | 'global') => void;
+  onSendChat?: (text: string, channel: 'nearby' | 'global') => void;
+  onSendMessage?: (text: string, channel: 'nearby' | 'global') => void;
   onSendEmote: (emote: EmoteType) => void;
 }
 
@@ -30,11 +31,14 @@ const EMOTE_LIST: { id: EmoteType; label: string }[] = [
 export const IslandChat: React.FC<Props> = ({
   messages,
   onSendChat,
+  onSendMessage,
   onSendEmote,
 }) => {
   const [text, setText] = useState('');
   const [showEmotes, setShowEmotes] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const sendMessage = onSendChat || onSendMessage;
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -43,7 +47,7 @@ export const IslandChat: React.FC<Props> = ({
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!text.trim()) return;
-    onSendChat(text, 'nearby');
+    sendMessage?.(text, 'nearby');
     soundManager.playChatMessage();
     setText('');
   };

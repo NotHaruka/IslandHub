@@ -16,7 +16,7 @@ import { VoidHordeUpgrades } from './voidHorde/VoidHordeUpgrades';
 import { MatchResultsModal } from './components/MatchResultsModal';
 import { MobileJoystick } from './components/MobileJoystick';
 
-import { Gamepad2, Users, Volume2, VolumeX, Sparkles, UserCheck, Radio } from 'lucide-react';
+import { Gamepad2, Volume2, VolumeX, Sparkles, Radio, AlertCircle } from 'lucide-react';
 import { soundManager } from './audio/soundManager';
 
 export default function App() {
@@ -35,6 +35,7 @@ export default function App() {
   const [rooms, setRooms] = useState<GameRoom[]>([]);
   const [currentRoom, setCurrentRoom] = useState<GameRoom | null>(null);
   const [vhState, setVhState] = useState<VoidHordeState | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [showAvatarCustomizer, setShowAvatarCustomizer] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
@@ -140,6 +141,16 @@ export default function App() {
           setVhState(msg.vhState);
           break;
 
+        case 'vh_event':
+          if (msg.eventType === 'wave_start') soundManager.playWaveHorn();
+          else if (msg.eventType === 'core_hit' || msg.eventType === 'boss_spawn') soundManager.playCoreAlarm();
+          break;
+
+        case 'error':
+          setErrorMessage(msg.message);
+          setTimeout(() => setErrorMessage(null), 4000);
+          break;
+
         case 'room_left':
           setScreen('island');
           setCurrentRoom(null);
@@ -157,7 +168,7 @@ export default function App() {
   const handleUpdateAvatar = (newUsername: string, newAvatar: PlayerAvatar) => {
     setUsername(newUsername);
     setAvatar(newAvatar);
-    networkClient.connect(newUsername, newAvatar);
+    networkClient.updateProfile(newUsername, newAvatar);
   };
 
   // Sound Mute Toggle
@@ -178,11 +189,8 @@ export default function App() {
     const openRoom = rooms.find((r) => r.gameId === gameId && r.state === 'lobby' && r.players.length < r.maxPlayers);
     if (openRoom) {
       networkClient.joinRoom(openRoom.id);
-      setTimeout(() => {
-        networkClient.startGame();
-      }, 200);
     } else {
-      networkClient.createRoom(gameId, `${username}'s Strike Team`, 4, true);
+      networkClient.createRoom(gameId, `${username}'s Squad`, 4, true);
     }
   };
 
@@ -226,8 +234,18 @@ export default function App() {
     setVhState(null);
   };
 
+  const realPlayerCount = islandPlayers.filter((p) => !p.isBot).length;
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none">
+      {/* Server Error Toast Banner */}
+      {errorMessage && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-rose-950/90 border border-rose-800 text-rose-200 text-xs font-bold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce">
+          <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
+
       {/* 1. TOP HEADER BAR HUD */}
       <div className="fixed top-0 left-0 right-0 z-40 p-4 flex items-center justify-between pointer-events-none">
         {/* Left: App Branding & Status */}
@@ -241,7 +259,7 @@ export default function App() {
             </h1>
             <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>ONLINE ({islandPlayers.length})</span>
+              <span>ONLINE ({realPlayerCount})</span>
             </div>
           </div>
         </div>
@@ -291,8 +309,8 @@ export default function App() {
           />
 
           <IslandChat
-            localPlayerId={localPlayerId}
             messages={chatMessages}
+            onSendChat={(txt, channel) => networkClient.sendChat(txt, channel)}
             onSendMessage={(txt, channel) => networkClient.sendChat(txt, channel)}
             onSendEmote={(emote) => networkClient.sendEmote(emote)}
           />
@@ -337,7 +355,11 @@ export default function App() {
 
           {/* Intermission Upgrade Modal */}
           {vhState.waveState === 'intermission' && (
-            <VoidHordeUpgrades onSelectUpgrade={handleSelectUpgrade} timer={vhState.waveTimer} />
+            <VoidHordeUpgrades
+              onSelectUpgrade={handleSelectUpgrade}
+              timer={vhState.waveTimer}
+              hasSelected={vhState.players[localPlayerId]?.hasSelectedUpgrade}
+            />
           )}
 
           {/* Victory / Defeat End Game Modal */}

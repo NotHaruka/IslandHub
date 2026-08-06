@@ -65,6 +65,12 @@ export class NetworkClient {
     }
   }
 
+  public updateProfile(username: string, avatar: IslandPlayer['avatar']) {
+    this.username = username;
+    this.avatar = avatar;
+    this.send({ type: 'update_profile', username, avatar });
+  }
+
   private scheduleReconnect() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => {

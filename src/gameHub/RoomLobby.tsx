@@ -1,7 +1,8 @@
 import React from 'react';
-import { GameRoom, RoomPlayer } from '../types/gameHub';
-import { WeaponType, WeaponStats } from '../types/voidHorde';
-import { Crown, CheckCircle2, Shield, Play, LogOut, Crosshair, Zap, Radio, Users } from 'lucide-react';
+import { GameRoom } from '../types/gameHub';
+import { WeaponType } from '../types/voidHorde';
+import { WEAPON_DEFS } from '../config/weapons';
+import { Crown, CheckCircle2, LogOut, Crosshair, Zap, Users, Play } from 'lucide-react';
 import { soundManager } from '../audio/soundManager';
 
 interface Props {
@@ -13,45 +14,6 @@ interface Props {
   onLeaveRoom: () => void;
 }
 
-const WEAPONS: Record<WeaponType, WeaponStats> = {
-  plasma: {
-    id: 'plasma',
-    name: 'Plasma Blaster',
-    description: 'Rapid-fire energy blaster with high accuracy and reliable single-target DPS.',
-    damage: 35,
-    fireRate: 8,
-    projectileSpeed: 700,
-    spread: 0.08,
-    pellets: 1,
-    color: '#38bdf8',
-    energyCost: 0,
-  },
-  scatter: {
-    id: 'scatter',
-    name: 'Scatter Cannon',
-    description: 'Fires 5 energy pellets in a wide cone. Devastating for horde crowd control.',
-    damage: 22,
-    fireRate: 3.5,
-    projectileSpeed: 550,
-    spread: 0.35,
-    pellets: 5,
-    color: '#fbbf24',
-    energyCost: 0,
-  },
-  railgun: {
-    id: 'railgun',
-    name: 'Void Railgun',
-    description: 'High-power piercing beam that penetrates multiple lined-up Void enemies.',
-    damage: 180,
-    fireRate: 1.8,
-    projectileSpeed: 1100,
-    spread: 0.01,
-    pellets: 1,
-    color: '#c084fc',
-    energyCost: 0,
-  },
-};
-
 export const RoomLobby: React.FC<Props> = ({
   room,
   localPlayerId,
@@ -62,6 +24,11 @@ export const RoomLobby: React.FC<Props> = ({
 }) => {
   const localPlayer = room.players.find((p) => p.id === localPlayerId);
   const isHost = localPlayer?.isHost || false;
+  const allReady = room.players.length > 0 && room.players.every((p) => p.isReady);
+
+  const weaponList = Object.values(WEAPON_DEFS);
+  const maxDamage = Math.max(...weaponList.map((w) => w.damage));
+  const maxFireRate = Math.max(...weaponList.map((w) => w.fireRate));
 
   const handleWeaponChange = (w: WeaponType) => {
     onSelectWeapon(w);
@@ -69,6 +36,7 @@ export const RoomLobby: React.FC<Props> = ({
   };
 
   const handleStart = () => {
+    if (!allReady) return;
     soundManager.playWaveHorn();
     onStartGame();
   };
@@ -140,7 +108,7 @@ export const RoomLobby: React.FC<Props> = ({
                               )}
                             </div>
                             <span className="text-[11px] text-slate-400 font-mono capitalize">
-                              {WEAPONS[player.weapon]?.name || 'Plasma Blaster'}
+                              {WEAPON_DEFS[player.weapon]?.name || 'Plasma Blaster'}
                             </span>
                           </div>
                         </div>
@@ -174,8 +142,8 @@ export const RoomLobby: React.FC<Props> = ({
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {(Object.keys(WEAPONS) as WeaponType[]).map((wKey) => {
-                  const w = WEAPONS[wKey];
+                {(Object.keys(WEAPON_DEFS) as WeaponType[]).map((wKey) => {
+                  const w = WEAPON_DEFS[wKey];
                   const isSelected = localPlayer?.weapon === wKey;
                   return (
                     <button
@@ -197,13 +165,13 @@ export const RoomLobby: React.FC<Props> = ({
                         <div className="space-y-0.5">
                           <div className="flex justify-between"><span>DMG</span><span>{w.damage}</span></div>
                           <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
-                            <div className="h-full bg-emerald-400" style={{ width: `${Math.min(100, (w.damage / 200) * 100)}%` }} />
+                            <div className="h-full bg-emerald-400" style={{ width: `${Math.min(100, (w.damage / maxDamage) * 100)}%` }} />
                           </div>
                         </div>
                         <div className="space-y-0.5">
                           <div className="flex justify-between"><span>FIRE RATE</span><span>{w.fireRate}/s</span></div>
                           <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
-                            <div className="h-full bg-amber-400" style={{ width: `${Math.min(100, (w.fireRate / 10) * 100)}%` }} />
+                            <div className="h-full bg-amber-400" style={{ width: `${Math.min(100, (w.fireRate / maxFireRate) * 100)}%` }} />
                           </div>
                         </div>
                       </div>
@@ -214,29 +182,41 @@ export const RoomLobby: React.FC<Props> = ({
             </div>
 
             {/* Bottom Launch Bar */}
-            <div className="pt-4 border-t border-slate-800 flex items-center justify-between gap-3">
-              <button
-                onClick={() => onToggleReady()}
-                className={`flex-1 py-3 rounded-xl font-bold text-xs uppercase tracking-wider border transition cursor-pointer ${
-                  localPlayer?.isReady
-                    ? 'bg-emerald-500/10 border-emerald-400 text-emerald-300'
-                    : 'bg-amber-400 hover:bg-amber-300 border-amber-300 text-slate-950 shadow-sm'
-                }`}
-              >
-                {localPlayer?.isReady ? 'READY TO DEPLOY' : 'TOGGLE READY'}
-              </button>
-
-              {isHost ? (
+            <div className="pt-4 border-t border-slate-800 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
                 <button
-                  onClick={handleStart}
-                  className="flex-1 py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition bg-emerald-500 hover:bg-emerald-400 text-slate-950 transform active:scale-95 cursor-pointer"
+                  onClick={() => onToggleReady()}
+                  className={`flex-1 py-3 rounded-xl font-bold text-xs uppercase tracking-wider border transition cursor-pointer ${
+                    localPlayer?.isReady
+                      ? 'bg-emerald-500/10 border-emerald-400 text-emerald-300'
+                      : 'bg-amber-400 hover:bg-amber-300 border-amber-300 text-slate-950 shadow-sm'
+                  }`}
                 >
-                  <Play className="w-4 h-4 fill-current" /> LAUNCH MATCH
+                  {localPlayer?.isReady ? 'READY TO DEPLOY' : 'TOGGLE READY'}
                 </button>
-              ) : (
-                <div className="text-xs text-slate-400 font-medium text-center italic flex-1">
-                  Waiting for host to launch...
-                </div>
+
+                {isHost ? (
+                  <button
+                    onClick={handleStart}
+                    disabled={!allReady}
+                    className={`flex-1 py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition ${
+                      allReady
+                        ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 cursor-pointer transform active:scale-95'
+                        : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed opacity-70'
+                    }`}
+                  >
+                    <Play className="w-4 h-4 fill-current" /> LAUNCH MATCH
+                  </button>
+                ) : (
+                  <div className="text-xs text-slate-400 font-medium text-center italic flex-1">
+                    Waiting for host to launch...
+                  </div>
+                )}
+              </div>
+              {isHost && !allReady && (
+                <p className="text-[10px] text-amber-400 text-center font-mono uppercase tracking-wider">
+                  ⚠️ All squad members must be READY before launching
+                </p>
               )}
             </div>
           </div>
