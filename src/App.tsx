@@ -199,7 +199,6 @@ export default function App() {
           <IslandChat
             messages={chatMessages}
             onSendChat={(txt, channel) => networkClient.sendChat(txt, channel)}
-            onSendMessage={(txt, channel) => networkClient.sendChat(txt, channel)}
             onSendEmote={(emote) => networkClient.sendEmote(emote)}
           />
 

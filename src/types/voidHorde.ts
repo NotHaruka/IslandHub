@@ -159,6 +159,7 @@ export interface IslandDefenseState {
   maxWaves: number;
   phase: IslandPhase;
   phaseTimer: number;
+  enemiesSpawnedThisWave: number;
   activeBreaches: Array<{ name: string; x: number; y: number }>;
   core: CoreEntity;
   players: Record<string, IslandPlayer>;

@@ -72,6 +72,7 @@ export function setupMultiplayerServer(server: HttpServer) {
     maxWaves: 10,
     phase: 'peaceful',
     phaseTimer: 30,
+    enemiesSpawnedThisWave: 0,
     activeBreaches: [
       { name: 'North Breach', x: 1200, y: 250 },
       { name: 'East Breach', x: 2150, y: 1200 },
@@ -574,6 +575,7 @@ export function setupMultiplayerServer(server: HttpServer) {
               islandState.wave = 1;
               islandState.phase = 'peaceful';
               islandState.phaseTimer = 25;
+              islandState.enemiesSpawnedThisWave = 0;
               islandState.core.hp = islandState.core.maxHp;
               islandState.core.shield = islandState.core.maxShield;
               islandState.enemies = [];
@@ -632,9 +634,11 @@ export function setupMultiplayerServer(server: HttpServer) {
           broadcastAll({ type: 'island_event', eventType: 'wave_warning', data: { wave: islandState.wave } });
         } else if (islandState.phase === 'warning') {
           islandState.phase = 'defense';
+          islandState.enemiesSpawnedThisWave = 0;
           broadcastAll({ type: 'island_event', eventType: 'wave_start', data: { wave: islandState.wave } });
         } else if (islandState.phase === 'intermission') {
           islandState.wave += 1;
+          islandState.enemiesSpawnedThisWave = 0;
           if (islandState.wave > islandState.maxWaves) {
             islandState.phase = 'victory';
             broadcastAll({ type: 'island_event', eventType: 'victory' });
@@ -677,7 +681,9 @@ export function setupMultiplayerServer(server: HttpServer) {
     if (islandState.phase === 'defense') {
       const targetEnemyCount = islandState.wave * 12 + 6;
 
-      if (islandState.enemies.length < targetEnemyCount && Math.random() < 0.25) {
+      if (islandState.enemiesSpawnedThisWave < targetEnemyCount && Math.random() < 0.35) {
+        islandState.enemiesSpawnedThisWave += 1;
+
         // Pick breach portal based on wave
         const breachIndex = Math.floor(Math.random() * islandState.activeBreaches.length);
         const breach = islandState.activeBreaches[breachIndex];
@@ -769,8 +775,11 @@ export function setupMultiplayerServer(server: HttpServer) {
         }
       }
 
-      // Check if wave cleared
-      if (islandState.enemies.length === 0 && islandState.phaseTimer <= 0) {
+      // Check if wave cleared: ALL wave enemies spawned AND all defeated
+      if (
+        islandState.enemiesSpawnedThisWave >= targetEnemyCount &&
+        islandState.enemies.length === 0
+      ) {
         islandState.phase = 'intermission';
         islandState.phaseTimer = 12;
 

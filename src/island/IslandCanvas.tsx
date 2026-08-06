@@ -101,8 +101,16 @@ export const IslandCanvas: React.FC<Props> = ({
 
       const localP = stateRef.current.players[localPlayerId];
       if (localP) {
-        posRef.current.x = localP.x;
-        posRef.current.y = localP.y;
+        const errX = localP.x - posRef.current.x;
+        const errY = localP.y - posRef.current.y;
+        const errDist = Math.hypot(errX, errY);
+        if (errDist > 120) {
+          posRef.current.x = localP.x;
+          posRef.current.y = localP.y;
+        } else if (errDist > 2) {
+          posRef.current.x += errX * 0.15;
+          posRef.current.y += errY * 0.15;
+        }
       }
 
       let dx = 0;
@@ -195,9 +203,8 @@ export const IslandCanvas: React.FC<Props> = ({
         canvas.height = window.innerHeight;
       }
 
-      const localP = curState.players[localPlayerId];
-      const camX = localP ? localP.x : posRef.current.x;
-      const camY = localP ? localP.y : posRef.current.y;
+      const camX = posRef.current.x;
+      const camY = posRef.current.y;
 
       ctx.save();
       // Center Camera on local player
