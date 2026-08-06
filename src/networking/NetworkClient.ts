@@ -1,5 +1,6 @@
 import { ClientMessage, ServerMessage } from '../types/networking';
 import { IslandPlayer } from '../types/island';
+import { StructureType, WeaponType } from '../types/voidHorde';
 
 type ServerMessageHandler = (msg: ServerMessage) => void;
 
@@ -33,7 +34,7 @@ export class NetworkClient {
         this.isConnected = true;
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
-        // Auto join island upon connect
+        // Join unified island state
         this.send({
           type: 'join_island',
           username: this.username,
@@ -92,8 +93,16 @@ export class NetworkClient {
   }
 
   // Method shortcuts
-  public moveIsland(x: number, y: number, vx: number, vy: number, facing: IslandPlayer['facing']) {
-    this.send({ type: 'move_island', x, y, vx, vy, facing });
+  public sendIslandInput(
+    x: number,
+    y: number,
+    vx: number,
+    vy: number,
+    facing: IslandPlayer['facing'],
+    shooting: boolean,
+    aimAngle: number
+  ) {
+    this.send({ type: 'island_input', x, y, vx, vy, facing, shooting, aimAngle });
   }
 
   public sendChat(text: string, channel: 'nearby' | 'global' = 'nearby') {
@@ -104,40 +113,44 @@ export class NetworkClient {
     this.send({ type: 'emote', emote });
   }
 
-  public createRoom(gameId: string, name: string, maxPlayers: number, autoStart?: boolean) {
-    this.send({ type: 'create_room', gameId, name, maxPlayers, autoStart });
+  public buildStructure(padId: string, structureType: StructureType) {
+    this.send({ type: 'build_structure', padId, structureType });
   }
 
-  public joinRoom(roomId: string) {
-    this.send({ type: 'join_room', roomId });
+  public upgradeStructure(structureId: string) {
+    this.send({ type: 'upgrade_structure', structureId });
   }
 
-  public leaveRoom() {
-    this.send({ type: 'leave_room' });
+  public repairStructure(structureId: string) {
+    this.send({ type: 'repair_structure', structureId });
   }
 
-  public toggleReady(weapon?: any) {
-    this.send({ type: 'toggle_ready', weapon });
+  public upgradeCore(upgradeType: 'health' | 'shield' | 'turret') {
+    this.send({ type: 'upgrade_core', upgradeType });
   }
 
-  public selectWeapon(weapon: any) {
-    this.send({ type: 'select_weapon', weapon });
+  public buyWeapon(weapon: WeaponType) {
+    this.send({ type: 'buy_weapon', weapon });
   }
 
-  public startGame() {
-    this.send({ type: 'start_game' });
+  public triggerNextWave() {
+    this.send({ type: 'trigger_next_wave' });
   }
 
-  public sendVhInput(x: number, y: number, vx: number, vy: number, shooting: boolean, aimAngle: number) {
-    this.send({ type: 'vh_player_input', x, y, vx, vy, shooting, aimAngle });
+  public revivePlayer(targetPlayerId: string) {
+    this.send({ type: 'revive_player', targetPlayerId });
   }
 
-  public selectUpgrade(upgradeId: string) {
-    this.send({ type: 'vh_select_upgrade', upgradeId });
+  public pingLocation(x: number, y: number, pingType: 'help' | 'defend' | 'build' | 'resource') {
+    this.send({ type: 'ping_location', x, y, pingType });
   }
 
-  public returnToIsland() {
-    this.send({ type: 'return_to_island' });
+  public collectResource(resourceId: string) {
+    this.send({ type: 'collect_resource', resourceId });
+  }
+
+  public restartGame() {
+    this.send({ type: 'restart_game' });
   }
 }
 

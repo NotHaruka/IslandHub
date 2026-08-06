@@ -1,27 +1,25 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { networkClient } from './networking/NetworkClient';
 import { IslandPlayer, ChatMessage, PlayerAvatar } from './types/island';
-import { GameRoom } from './types/gameHub';
-import { VoidHordeState } from './types/voidHorde';
+import { IslandDefenseState, BuildPad, DefensiveStructure, StructureType, WeaponType } from './types/voidHorde';
 import { ServerMessage } from './types/networking';
 
 import { IslandCanvas } from './island/IslandCanvas';
+import { IslandHUD } from './island/IslandHUD';
 import { IslandChat } from './island/IslandChat';
+import { BuildMenuModal } from './island/BuildMenuModal';
+import { DepotModal } from './island/DepotModal';
+import { Minimap } from './island/Minimap';
+import { VictoryDefeatModal } from './island/VictoryDefeatModal';
 import { AvatarCustomizer } from './components/AvatarCustomizer';
-import { GameHubModal } from './gameHub/GameHubModal';
-import { RoomLobby } from './gameHub/RoomLobby';
-import { VoidHordeCanvas } from './voidHorde/VoidHordeCanvas';
-import { VoidHordeHUD } from './voidHorde/VoidHordeHUD';
-import { VoidHordeUpgrades } from './voidHorde/VoidHordeUpgrades';
-import { MatchResultsModal } from './components/MatchResultsModal';
 import { MobileJoystick } from './components/MobileJoystick';
 
-import { Gamepad2, Volume2, VolumeX, Sparkles, Radio, AlertCircle } from 'lucide-react';
+import { Volume2, VolumeX, Sparkles, Radio, AlertCircle } from 'lucide-react';
 import { soundManager } from './audio/soundManager';
 
 export default function App() {
   const [localPlayerId, setLocalPlayerId] = useState<string>('');
-  const [username, setUsername] = useState<string>(() => 'Explorer_' + Math.floor(Math.random() * 899 + 100));
+  const [username, setUsername] = useState<string>(() => 'Defender_' + Math.floor(Math.random() * 899 + 100));
   const [avatar, setAvatar] = useState<PlayerAvatar>({
     bodyColor: '#38bdf8',
     hat: 'none',
@@ -29,20 +27,21 @@ export default function App() {
     accessory: 'none',
   });
 
-  const [screen, setScreen] = useState<'island' | 'game_hub' | 'room_lobby' | 'void_horde'>('island');
-  const [islandPlayers, setIslandPlayers] = useState<IslandPlayer[]>([]);
+  const [islandState, setIslandState] = useState<IslandDefenseState | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [rooms, setRooms] = useState<GameRoom[]>([]);
-  const [currentRoom, setCurrentRoom] = useState<GameRoom | null>(null);
-  const [vhState, setVhState] = useState<VoidHordeState | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Modals & UI overlays
+  const [selectedPad, setSelectedPad] = useState<{ pad: BuildPad; existingStruct: DefensiveStructure | null } | null>(
+    null
+  );
+  const [showDepot, setShowDepot] = useState(false);
   const [showAvatarCustomizer, setShowAvatarCustomizer] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const [touchShooting, setTouchShooting] = useState(false);
 
-  // Input States
+  // Controls & Inputs
   const keysPressed = useRef<Record<string, boolean>>({});
   const [keysState, setKeysState] = useState<Record<string, boolean>>({});
   const [joystickVel, setJoystickVel] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -55,25 +54,11 @@ export default function App() {
   // Keyboard Event Listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't capture keys if typing in chat
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
         return;
       }
-
       keysPressed.current[e.code] = true;
       setKeysState({ ...keysPressed.current });
-
-      // Shortcut E to open Game Hub portal when near
-      if (e.code === 'KeyE' && screen === 'island') {
-        const p = islandPlayers.find((pl) => pl.id === localPlayerId);
-        if (p) {
-          const dist = Math.hypot(p.x - 700, p.y - 220);
-          if (dist < 120) {
-            setScreen('game_hub');
-            soundManager.playChatMessage();
-          }
-        }
-      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -88,7 +73,7 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [screen, islandPlayers, localPlayerId]);
+  }, []);
 
   // Connect to Network WebSocket & Subscribe
   useEffect(() => {
@@ -98,63 +83,31 @@ export default function App() {
       switch (msg.type) {
         case 'init_client':
           setLocalPlayerId(msg.playerId);
-          setIslandPlayers(msg.islandPlayers);
-          setRooms(msg.rooms);
+          setIslandState(msg.islandState);
           break;
 
         case 'island_state_sync':
-          setIslandPlayers(msg.players);
+          setIslandState(msg.islandState);
           break;
 
         case 'chat_broadcast':
           setChatMessages((prev) => [...prev.slice(-49), msg.message]);
           break;
 
-        case 'rooms_updated':
-          setRooms(msg.rooms);
+        case 'ping_broadcast':
+          soundManager.playPing();
           break;
 
-        case 'room_joined':
-          setCurrentRoom(msg.room);
-          if (msg.room.state === 'playing') {
-            setScreen('void_horde');
-          } else {
-            setScreen('room_lobby');
-          }
-          break;
-
-        case 'room_updated':
-          setCurrentRoom(msg.room);
-          if (msg.room.state === 'playing') {
-            setScreen('void_horde');
-          } else if (msg.room.state === 'lobby') {
-            setScreen('room_lobby');
-          }
-          break;
-
-        case 'game_started':
-          setVhState(msg.initialVhState);
-          setScreen('void_horde');
-          break;
-
-        case 'vh_state_sync':
-          setVhState(msg.vhState);
-          break;
-
-        case 'vh_event':
-          if (msg.eventType === 'wave_start') soundManager.playWaveHorn();
-          else if (msg.eventType === 'core_hit' || msg.eventType === 'boss_spawn') soundManager.playCoreAlarm();
+        case 'island_event':
+          if (msg.eventType === 'wave_warning') soundManager.playWaveHorn();
+          else if (msg.eventType === 'wave_start') soundManager.playWaveHorn();
+          else if (msg.eventType === 'boss_spawn' || msg.eventType === 'core_hit') soundManager.playCoreAlarm();
+          else if (msg.eventType === 'wave_complete') soundManager.playUpgradeBuy();
           break;
 
         case 'error':
           setErrorMessage(msg.message);
           setTimeout(() => setErrorMessage(null), 4000);
-          break;
-
-        case 'room_left':
-          setScreen('island');
-          setCurrentRoom(null);
-          setVhState(null);
           break;
       }
     });
@@ -177,64 +130,34 @@ export default function App() {
     setIsAudioMuted(muted);
   };
 
-  // Island Portal Trigger
-  const handleInteractPortal = () => {
-    soundManager.playChatMessage();
-    setScreen('game_hub');
+  const handleSelectPad = (pad: BuildPad, existingStruct: DefensiveStructure | null) => {
+    setSelectedPad({ pad, existingStruct });
   };
 
-  // Game Hub Handlers
-  const handleQuickPlay = (gameId: string) => {
-    soundManager.playChatMessage();
-    const openRoom = rooms.find((r) => r.gameId === gameId && r.state === 'lobby' && r.players.length < r.maxPlayers);
-    if (openRoom) {
-      networkClient.joinRoom(openRoom.id);
-    } else {
-      networkClient.createRoom(gameId, `${username}'s Squad`, 4, true);
-    }
+  const handleBuildStructure = (padId: string, structureType: StructureType) => {
+    networkClient.buildStructure(padId, structureType);
+    setSelectedPad(null);
   };
 
-  const handleCreateRoom = (gameId: string, name: string, maxPlayers: number) => {
-    soundManager.playChatMessage();
-    networkClient.createRoom(gameId, name, maxPlayers);
+  const handleUpgradeStructure = (structureId: string) => {
+    networkClient.upgradeStructure(structureId);
+    setSelectedPad(null);
   };
 
-  const handleJoinRoom = (roomId: string) => {
-    soundManager.playChatMessage();
-    networkClient.joinRoom(roomId);
+  const handleRepairStructure = (structureId: string) => {
+    networkClient.repairStructure(structureId);
+    setSelectedPad(null);
   };
 
-  const handleLeaveRoom = () => {
-    soundManager.playChatMessage();
-    networkClient.leaveRoom();
-    setScreen('island');
-    setCurrentRoom(null);
+  const handleUpgradeCore = (type: 'health' | 'shield' | 'turret') => {
+    networkClient.upgradeCore(type);
   };
 
-  const handleToggleReady = (weapon?: any) => {
-    networkClient.toggleReady(weapon);
+  const handleBuyWeapon = (weapon: WeaponType) => {
+    networkClient.buyWeapon(weapon);
   };
 
-  const handleSelectWeapon = (weapon: any) => {
-    networkClient.selectWeapon(weapon);
-  };
-
-  const handleStartGame = () => {
-    networkClient.startGame();
-  };
-
-  const handleSelectUpgrade = (upgradeId: string) => {
-    networkClient.selectUpgrade(upgradeId);
-  };
-
-  const handleReturnToIsland = () => {
-    networkClient.returnToIsland();
-    setScreen('island');
-    setCurrentRoom(null);
-    setVhState(null);
-  };
-
-  const realPlayerCount = islandPlayers.filter((p) => !p.isBot).length;
+  const localPlayer = islandState?.players[localPlayerId];
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none">
@@ -246,66 +169,31 @@ export default function App() {
         </div>
       )}
 
-      {/* 1. TOP HEADER BAR HUD */}
-      <div className="fixed top-0 left-0 right-0 z-40 p-4 flex items-center justify-between pointer-events-none">
-        {/* Left: App Branding & Status */}
-        <div className="flex items-center gap-3 bg-[#0d111d]/90 backdrop-blur-md border border-slate-800 p-2.5 px-4 rounded-xl shadow-lg pointer-events-auto">
-          <div className="p-1.5 bg-slate-800 border border-slate-700/80 rounded-lg text-emerald-400">
-            <Radio className="w-4 h-4" />
-          </div>
-          <div>
-            <h1 className="text-xs font-bold tracking-wider text-slate-100 uppercase">
-              Shared Island
-            </h1>
-            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>ONLINE ({realPlayerCount})</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Quick Action Controls */}
-        <div className="flex items-center gap-2 pointer-events-auto">
-          {screen === 'island' && (
-            <button
-              onClick={() => {
-                soundManager.playChatMessage();
-                setScreen('game_hub');
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs rounded-lg shadow-sm transition transform active:scale-95 uppercase tracking-wider cursor-pointer"
-            >
-              <Gamepad2 className="w-4 h-4" /> MULTIPLAYER ARCADE
-            </button>
-          )}
-
-          <button
-            onClick={() => setShowAvatarCustomizer(!showAvatarCustomizer)}
-            className="p-2 bg-[#0d111d]/90 hover:bg-slate-800 backdrop-blur-md border border-slate-800 rounded-lg text-slate-300 transition shadow-sm cursor-pointer"
-            title="Customize Explorer Avatar"
-          >
-            <Sparkles className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={toggleMute}
-            className="p-2 bg-[#0d111d]/90 hover:bg-slate-800 backdrop-blur-md border border-slate-800 rounded-lg text-slate-300 transition shadow-sm cursor-pointer"
-            title={isAudioMuted ? 'Unmute Audio' : 'Mute Audio'}
-          >
-            {isAudioMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
-          </button>
-        </div>
-      </div>
-
-      {/* 2. MAIN ACTIVE VIEW RENDERER */}
-      {screen === 'island' && (
+      {/* Main Active Island Game Canvas & Overlay UI */}
+      {islandState && (
         <>
           <IslandCanvas
             localPlayerId={localPlayerId}
-            players={islandPlayers}
-            onInteractPortal={handleInteractPortal}
-            onMoveInput={(x, y, vx, vy, facing) => networkClient.moveIsland(x, y, vx, vy, facing)}
+            state={islandState}
+            onSendInput={(x, y, vx, vy, facing, shooting, aimAngle) =>
+              networkClient.sendIslandInput(x, y, vx, vy, facing, shooting, aimAngle)
+            }
+            onSelectPad={handleSelectPad}
+            onRevivePlayer={(targetId) => networkClient.revivePlayer(targetId)}
+            onCollectResource={(resId) => networkClient.collectResource(resId)}
             keysPressed={keysState}
             joystickVel={joystickVel}
+            touchShooting={touchShooting}
+          />
+
+          <IslandHUD
+            state={islandState}
+            localPlayerId={localPlayerId}
+            onOpenDepot={() => setShowDepot(true)}
+            onTriggerNextWave={() => networkClient.triggerNextWave()}
+            onOpenPingMenu={() =>
+              networkClient.pingLocation(localPlayer?.x || 1200, localPlayer?.y || 1200, 'defend')
+            }
           />
 
           <IslandChat
@@ -314,66 +202,72 @@ export default function App() {
             onSendMessage={(txt, channel) => networkClient.sendChat(txt, channel)}
             onSendEmote={(emote) => networkClient.sendEmote(emote)}
           />
-        </>
-      )}
 
-      {screen === 'game_hub' && (
-        <GameHubModal
-          rooms={rooms}
-          onCreateRoom={handleCreateRoom}
-          onJoinRoom={handleJoinRoom}
-          onQuickPlay={handleQuickPlay}
-          onClose={() => setScreen('island')}
-        />
-      )}
+          {/* Minimap Radar */}
+          <div className="fixed bottom-4 right-4 z-30">
+            <Minimap state={islandState} localPlayerId={localPlayerId} />
+          </div>
 
-      {screen === 'room_lobby' && currentRoom && (
-        <RoomLobby
-          room={currentRoom}
-          localPlayerId={localPlayerId}
-          onToggleReady={handleToggleReady}
-          onSelectWeapon={handleSelectWeapon}
-          onStartGame={handleStartGame}
-          onLeaveRoom={handleLeaveRoom}
-        />
-      )}
-
-      {screen === 'void_horde' && vhState && (
-        <>
-          <VoidHordeCanvas
-            vhState={vhState}
-            localPlayerId={localPlayerId}
-            onSendInput={(x, y, vx, vy, shooting, aimAngle) =>
-              networkClient.sendVhInput(x, y, vx, vy, shooting, aimAngle)
-            }
-            keysPressed={keysState}
-            joystickVel={joystickVel}
-            touchShooting={touchShooting}
-          />
-
-          <VoidHordeHUD vhState={vhState} localPlayerId={localPlayerId} />
-
-          {/* Intermission Upgrade Modal */}
-          {vhState.waveState === 'intermission' && (
-            <VoidHordeUpgrades
-              onSelectUpgrade={handleSelectUpgrade}
-              timer={vhState.waveTimer}
-              hasSelected={vhState.players[localPlayerId]?.hasSelectedUpgrade}
+          {/* Build Menu Modal */}
+          {selectedPad && (
+            <BuildMenuModal
+              pad={selectedPad.pad}
+              existingStructure={
+                islandState.structures.find((s) => s.id === selectedPad.pad.structureId) || null
+              }
+              scrap={islandState.sharedResources.scrap}
+              onBuild={handleBuildStructure}
+              onUpgrade={handleUpgradeStructure}
+              onRepair={handleRepairStructure}
+              onClose={() => setSelectedPad(null)}
             />
           )}
 
-          {/* Victory / Defeat End Game Modal */}
-          {(vhState.waveState === 'victory' || vhState.waveState === 'defeat') && (
-            <MatchResultsModal
-              vhState={vhState}
+          {/* Arsenal & Depot Modal */}
+          {showDepot && (
+            <DepotModal
+              currentWeapon={localPlayer?.weapon || 'plasma'}
+              energy={islandState.sharedResources.energy}
+              coreLevel={islandState.core.level}
+              coreHp={islandState.core.hp}
+              coreMaxHp={islandState.core.maxHp}
+              onBuyWeapon={handleBuyWeapon}
+              onUpgradeCore={handleUpgradeCore}
+              onClose={() => setShowDepot(false)}
+            />
+          )}
+
+          {/* Victory or Defeat Summary Overlay */}
+          {(islandState.phase === 'victory' || islandState.phase === 'defeat') && (
+            <VictoryDefeatModal
+              state={islandState}
               localPlayerId={localPlayerId}
-              onReturnToIsland={handleReturnToIsland}
+              onRestart={() => networkClient.restartGame()}
             />
           )}
         </>
       )}
 
-      {/* 3. AVATAR CUSTOMIZER DRAWER */}
+      {/* Top Controls: Profile Customizer & Mute */}
+      <div className="fixed top-4 right-4 z-40 flex items-center gap-2 pointer-events-auto">
+        <button
+          onClick={() => setShowAvatarCustomizer(!showAvatarCustomizer)}
+          className="p-2.5 bg-[#0d111d]/90 hover:bg-slate-800 backdrop-blur-md border border-slate-800 rounded-xl text-slate-300 transition shadow-lg cursor-pointer"
+          title="Customize Avatar Profile"
+        >
+          <Sparkles className="w-4 h-4 text-amber-400" />
+        </button>
+
+        <button
+          onClick={toggleMute}
+          className="p-2.5 bg-[#0d111d]/90 hover:bg-slate-800 backdrop-blur-md border border-slate-800 rounded-xl text-slate-300 transition shadow-lg cursor-pointer"
+          title={isAudioMuted ? 'Unmute Audio' : 'Mute Audio'}
+        >
+          {isAudioMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+        </button>
+      </div>
+
+      {/* Avatar Customizer Modal */}
       {showAvatarCustomizer && (
         <AvatarCustomizer
           username={username}
@@ -383,25 +277,24 @@ export default function App() {
         />
       )}
 
-      {/* 4. MOBILE / TOUCH CONTROLS */}
+      {/* Mobile Touch Controls */}
       {isTouchDevice && (
-        <div className="fixed bottom-6 left-6 z-40 pointer-events-auto">
-          <MobileJoystick
-            onMove={(x, y) => setJoystickVel({ x, y })}
-            onEnd={() => setJoystickVel({ x: 0, y: 0 })}
-          />
-        </div>
-      )}
+        <>
+          <div className="fixed bottom-6 left-6 z-40 pointer-events-auto">
+            <MobileJoystick
+              onMove={(x, y) => setJoystickVel({ x, y })}
+              onEnd={() => setJoystickVel({ x: 0, y: 0 })}
+            />
+          </div>
 
-      {/* Touch Attack Button for Void Horde Mode */}
-      {isTouchDevice && screen === 'void_horde' && (
-        <button
-          onTouchStart={() => setTouchShooting(true)}
-          onTouchEnd={() => setTouchShooting(false)}
-          className="fixed bottom-8 right-8 z-40 w-20 h-20 bg-rose-500/80 active:bg-rose-600 border-2 border-rose-300 rounded-full flex items-center justify-center shadow-2xl text-white font-black text-xs uppercase tracking-wider backdrop-blur-md pointer-events-auto active:scale-95 transition"
-        >
-          FIRE
-        </button>
+          <button
+            onTouchStart={() => setTouchShooting(true)}
+            onTouchEnd={() => setTouchShooting(false)}
+            className="fixed bottom-8 right-8 z-40 w-20 h-20 bg-amber-500/80 active:bg-amber-600 border-2 border-amber-300 rounded-full flex items-center justify-center shadow-2xl text-slate-950 font-black text-xs uppercase tracking-wider backdrop-blur-md pointer-events-auto active:scale-95 transition"
+          >
+            FIRE
+          </button>
+        </>
       )}
     </div>
   );

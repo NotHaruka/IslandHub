@@ -15,6 +15,18 @@ export interface IslandPlayer {
   facing: 'up' | 'down' | 'left' | 'right';
   avatar: PlayerAvatar;
   isBot?: boolean;
+  hp: number;
+  maxHp: number;
+  shield: number;
+  maxShield: number;
+  weapon: string;
+  resources: { energy: number; scrap: number };
+  score: number;
+  kills: number;
+  damageDealt: number;
+  isAlive: boolean;
+  isDowned?: boolean;
+  reviveProgress?: number; // 0 to 100
   lastChat?: { text: string; timestamp: number };
   currentEmote?: { symbol: string; label: string; timestamp: number };
 }
@@ -35,3 +47,4 @@ export interface EmoteDefinition {
   symbol: string;
   label: string;
 }
+

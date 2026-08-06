@@ -1,6 +1,6 @@
 {
-  "name": "Island Hub + Void Horde",
-  "description": "A browser-based multiplayer social island hub and co-op horde-defense game.",
+  "name": "Multiplayer Island Defense",
+  "description": "A persistent co-op multiplayer island game where players socialize between waves and defend their island together when the Void Horde attacks.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

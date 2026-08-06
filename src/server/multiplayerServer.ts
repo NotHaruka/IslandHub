@@ -1,16 +1,25 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { Server as HttpServer } from 'http';
 import { IslandPlayer, ChatMessage, EmoteType } from '../types/island';
-import { GameRoom, RoomPlayer } from '../types/gameHub';
-import { VoidHordeState, EnemyEntity, ProjectileEntity, PlayerEntity, WeaponType, WeaponStats } from '../types/voidHorde';
+import {
+  IslandDefenseState,
+  DefensiveStructure,
+  BuildPad,
+  EnemyEntity,
+  ProjectileEntity,
+  ResourceDrop,
+  PingMarker,
+  StructureType,
+  WeaponType,
+} from '../types/voidHorde';
 import { ClientMessage, ServerMessage } from '../types/networking';
 import { WEAPON_DEFS } from '../config/weapons';
+import { STRUCTURE_DEFS } from '../config/structures';
 
 interface ClientConnection {
   ws: WebSocket;
   playerId: string;
   username: string;
-  roomId?: string;
   lastShotTime?: number;
 }
 
@@ -28,63 +37,150 @@ export function setupMultiplayerServer(server: HttpServer) {
 
   const clients = new Map<WebSocket, ClientConnection>();
 
-  // In-memory server state
-  const islandPlayers = new Map<string, IslandPlayer>();
-  const rooms = new Map<string, GameRoom>();
-  const vhStates = new Map<string, VoidHordeState>();
+  // Initialize Build Pads along pathways and Core perimeter (2400 x 2400 map world size)
+  const initialBuildPads: BuildPad[] = [
+    // North Path
+    { id: 'pad_n1', x: 1080, y: 500, radius: 24 },
+    { id: 'pad_n2', x: 1320, y: 500, radius: 24 },
+    { id: 'pad_n3', x: 1080, y: 850, radius: 24 },
+    { id: 'pad_n4', x: 1320, y: 850, radius: 24 },
+    // East Path
+    { id: 'pad_e1', x: 1900, y: 1080, radius: 24 },
+    { id: 'pad_e2', x: 1900, y: 1320, radius: 24 },
+    { id: 'pad_e3', x: 1550, y: 1080, radius: 24 },
+    { id: 'pad_e4', x: 1550, y: 1320, radius: 24 },
+    // South Path
+    { id: 'pad_s1', x: 1080, y: 1900, radius: 24 },
+    { id: 'pad_s2', x: 1320, y: 1900, radius: 24 },
+    { id: 'pad_s3', x: 1080, y: 1550, radius: 24 },
+    { id: 'pad_s4', x: 1320, y: 1550, radius: 24 },
+    // West Path
+    { id: 'pad_w1', x: 500, y: 1080, radius: 24 },
+    { id: 'pad_w2', x: 500, y: 1320, radius: 24 },
+    { id: 'pad_w3', x: 850, y: 1080, radius: 24 },
+    { id: 'pad_w4', x: 850, y: 1320, radius: 24 },
+    // Central Plaza Perimeter
+    { id: 'pad_c1', x: 1020, y: 1020, radius: 24 },
+    { id: 'pad_c2', x: 1380, y: 1020, radius: 24 },
+    { id: 'pad_c3', x: 1020, y: 1380, radius: 24 },
+    { id: 'pad_c4', x: 1380, y: 1380, radius: 24 },
+  ];
 
-  // Ambient Island Bots (to ensure social vitality)
-  const BOT_IDS = ['bot_nova', 'bot_atlas', 'bot_cyber_sam'];
+  // Global Unified Island Defense State
+  let islandState: IslandDefenseState = {
+    wave: 1,
+    maxWaves: 10,
+    phase: 'peaceful',
+    phaseTimer: 30,
+    activeBreaches: [
+      { name: 'North Breach', x: 1200, y: 250 },
+      { name: 'East Breach', x: 2150, y: 1200 },
+      { name: 'South Breach', x: 1200, y: 2150 },
+      { name: 'West Breach', x: 250, y: 1200 },
+    ],
+    core: {
+      x: 1200,
+      y: 1200,
+      radius: 55,
+      hp: 1200,
+      maxHp: 1200,
+      shield: 600,
+      maxShield: 600,
+      level: 1,
+      pulseTimer: 0,
+    },
+    players: {},
+    structures: [
+      // Pre-built starter auto turret
+      {
+        id: 'struct_init_1',
+        padId: 'pad_c1',
+        type: 'auto_turret',
+        x: 1020,
+        y: 1020,
+        hp: 250,
+        maxHp: 250,
+        level: 1,
+        range: 280,
+        damage: 28,
+        fireRate: 4,
+        cooldown: 0,
+        color: '#38bdf8',
+      },
+    ],
+    buildPads: initialBuildPads,
+    enemies: [],
+    projectiles: [],
+    resourceDrops: [],
+    particles: [],
+    damageTexts: [],
+    pings: [],
+    teamScore: 0,
+    totalKills: 0,
+    sharedResources: { energy: 450, scrap: 500 },
+  };
+
+  // Assign initial structure to pad_c1
+  const padC1 = islandState.buildPads.find((p) => p.id === 'pad_c1');
+  if (padC1) padC1.structureId = 'struct_init_1';
+
+  // Ambient Island NPCs
   const botConfigs: IslandPlayer[] = [
     {
       id: 'bot_nova',
-      username: 'Nova [NPC]',
-      x: 600,
-      y: 500,
+      username: 'Nova [Commander]',
+      x: 1100,
+      y: 1150,
       vx: 0,
       vy: 0,
       facing: 'down',
       avatar: { bodyColor: '#ec4899', hat: 'headphones', skin: 'cyber', accessory: 'aura' },
       isBot: true,
-      lastChat: { text: 'Welcome to Island Hub! Void Horde is ready at the Arcade portal!', timestamp: Date.now() },
+      hp: 100,
+      maxHp: 100,
+      shield: 50,
+      maxShield: 50,
+      weapon: 'plasma',
+      resources: { energy: 100, scrap: 100 },
+      score: 0,
+      kills: 0,
+      damageDealt: 0,
+      isAlive: true,
+      lastChat: { text: 'Prepare our defenses around the paths! Void breaches incoming!', timestamp: Date.now() },
     },
     {
       id: 'bot_atlas',
-      username: 'Atlas [NPC]',
-      x: 820,
-      y: 650,
+      username: 'Atlas [Engineer]',
+      x: 1300,
+      y: 1150,
       vx: 0,
       vy: 0,
       facing: 'left',
       avatar: { bodyColor: '#10b981', hat: 'visor', skin: 'android', accessory: 'none' },
       isBot: true,
-      lastChat: { text: 'Looking for a squad to beat Wave 10 Boss!', timestamp: Date.now() },
-    },
-    {
-      id: 'bot_cyber_sam',
-      username: 'Sam [Guide]',
-      x: 480,
-      y: 720,
-      vx: 0,
-      vy: 0,
-      facing: 'right',
-      avatar: { bodyColor: '#8b5cf6', hat: 'crown', skin: 'human', accessory: 'cape' },
-      isBot: true,
-      lastChat: { text: 'Step onto the Game Arcade portal to enter Void Horde!', timestamp: Date.now() },
+      hp: 100,
+      maxHp: 100,
+      shield: 50,
+      maxShield: 50,
+      weapon: 'scatter',
+      resources: { energy: 100, scrap: 100 },
+      score: 0,
+      kills: 0,
+      damageDealt: 0,
+      isAlive: true,
+      lastChat: { text: 'I built an Auto Turret on pad C1! Gather scrap to upgrade it.', timestamp: Date.now() },
     },
   ];
 
-  botConfigs.forEach((bot) => islandPlayers.set(bot.id, bot));
+  botConfigs.forEach((bot) => {
+    islandState.players[bot.id] = bot;
+  });
 
-  // Helper broadcast
+  // Helpers
   const sendTo = (ws: WebSocket, msg: ServerMessage) => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
     }
-  };
-
-  const getCleanRoomsList = () => {
-    return Array.from(rooms.values()).filter((r) => r.players.length > 0);
   };
 
   const broadcastAll = (msg: ServerMessage) => {
@@ -96,104 +192,12 @@ export function setupMultiplayerServer(server: HttpServer) {
     });
   };
 
-  const broadcastRoom = (roomId: string, msg: ServerMessage) => {
-    const data = JSON.stringify(msg);
-    clients.forEach((client) => {
-      if (client.roomId === roomId && client.ws.readyState === WebSocket.OPEN) {
-        client.ws.send(data);
-      }
-    });
-  };
-
-  // Clean helper to leave current room
-  const leaveCurrentRoom = (clientConn: ClientConnection) => {
-    if (!clientConn.roomId) return;
-    const room = rooms.get(clientConn.roomId);
-    if (room) {
-      room.players = room.players.filter((p) => p.id !== clientConn.playerId);
-      if (room.players.length === 0) {
-        rooms.delete(room.id);
-        vhStates.delete(room.id);
-      } else {
-        if (room.hostId === clientConn.playerId) {
-          room.hostId = room.players[0].id;
-          room.players[0].isHost = true;
-          room.players[0].isReady = true;
-        }
-        broadcastRoom(room.id, { type: 'room_updated', room });
-      }
-    }
-    clientConn.roomId = undefined;
-  };
-
-  const startMatchInRoom = (room: GameRoom) => {
-    room.state = 'playing';
-
-    const initialVhPlayers: Record<string, PlayerEntity> = {};
-    const numPlayers = room.players.length;
-
-    room.players.forEach((rp, idx) => {
-      const angle = (idx / numPlayers) * Math.PI * 2;
-      initialVhPlayers[rp.id] = {
-        id: rp.id,
-        username: rp.username,
-        x: 1000 + Math.cos(angle) * 120,
-        y: 1000 + Math.sin(angle) * 120,
-        vx: 0,
-        vy: 0,
-        hp: 100,
-        maxHp: 100,
-        shield: 50,
-        maxShield: 50,
-        weapon: rp.weapon,
-        score: 0,
-        kills: 0,
-        damageDealt: 0,
-        isAlive: true,
-        color: rp.avatarColor,
-      };
-    });
-
-    const initialVhState: VoidHordeState = {
-      roomId: room.id,
-      wave: 1,
-      maxWaves: 10,
-      waveState: 'preparing',
-      waveTimer: 5,
-      core: {
-        x: 1000,
-        y: 1000,
-        radius: 45,
-        hp: 1000,
-        maxHp: 1000,
-        shield: 500,
-        maxShield: 500,
-        pulseTimer: 0,
-      },
-      players: initialVhPlayers,
-      enemies: [],
-      projectiles: [],
-      particles: [],
-      damageTexts: [],
-      score: 0,
-      totalKills: 0,
-    };
-
-    vhStates.set(room.id, initialVhState);
-
-    broadcastRoom(room.id, {
-      type: 'game_started',
-      roomId: room.id,
-      initialVhState,
-    });
-
-    broadcastAll({ type: 'rooms_updated', rooms: getCleanRoomsList() });
-  };
-
+  // Handle WebSocket Connection
   wss.on('connection', (ws: WebSocket) => {
-    let clientConn: ClientConnection = {
+    const playerId = `player_${Math.random().toString(36).substring(2, 9)}`;
+    const clientConn: ClientConnection = {
       ws,
-      playerId: `player_${Math.random().toString(36).substring(2, 9)}`,
+      playerId,
       username: 'Explorer',
     };
     clients.set(ws, clientConn);
@@ -205,26 +209,34 @@ export function setupMultiplayerServer(server: HttpServer) {
         switch (msg.type) {
           case 'join_island': {
             clientConn.username = msg.username || 'Explorer';
-            leaveCurrentRoom(clientConn);
 
             const newPlayer: IslandPlayer = {
-              id: clientConn.playerId,
+              id: playerId,
               username: clientConn.username,
-              x: 500 + (Math.random() * 80 - 40),
-              y: 500 + (Math.random() * 80 - 40),
+              x: 1200 + (Math.random() * 120 - 60),
+              y: 1200 + (Math.random() * 120 - 60),
               vx: 0,
               vy: 0,
               facing: 'down',
               avatar: msg.avatar || { bodyColor: '#3b82f6', hat: 'none', skin: 'human', accessory: 'none' },
+              hp: 100,
+              maxHp: 100,
+              shield: 50,
+              maxShield: 50,
+              weapon: 'plasma',
+              resources: { energy: 50, scrap: 50 },
+              score: 0,
+              kills: 0,
+              damageDealt: 0,
+              isAlive: true,
             };
 
-            islandPlayers.set(clientConn.playerId, newPlayer);
+            islandState.players[playerId] = newPlayer;
 
             sendTo(ws, {
               type: 'init_client',
-              playerId: clientConn.playerId,
-              islandPlayers: Array.from(islandPlayers.values()),
-              rooms: getCleanRoomsList(),
+              playerId,
+              islandState,
             });
 
             broadcastAll({
@@ -236,33 +248,57 @@ export function setupMultiplayerServer(server: HttpServer) {
 
           case 'update_profile': {
             clientConn.username = msg.username || clientConn.username;
-            const player = islandPlayers.get(clientConn.playerId);
-            if (player) {
-              player.username = clientConn.username;
-              player.avatar = msg.avatar;
-            }
-            if (clientConn.roomId) {
-              const room = rooms.get(clientConn.roomId);
-              if (room) {
-                const rp = room.players.find((p) => p.id === clientConn.playerId);
-                if (rp) {
-                  rp.username = clientConn.username;
-                  rp.avatarColor = msg.avatar.bodyColor;
-                  broadcastRoom(room.id, { type: 'room_updated', room });
-                }
-              }
+            const p = islandState.players[playerId];
+            if (p) {
+              p.username = clientConn.username;
+              p.avatar = msg.avatar;
             }
             break;
           }
 
-          case 'move_island': {
-            const player = islandPlayers.get(clientConn.playerId);
-            if (player) {
-              player.x = msg.x;
-              player.y = msg.y;
-              player.vx = msg.vx;
-              player.vy = msg.vy;
-              player.facing = msg.facing;
+          case 'island_input': {
+            const p = islandState.players[playerId];
+            if (!p) return;
+
+            if (p.isAlive && !p.isDowned) {
+              p.x = Math.max(100, Math.min(2300, msg.x));
+              p.y = Math.max(100, Math.min(2300, msg.y));
+              p.vx = msg.vx;
+              p.vy = msg.vy;
+              p.facing = msg.facing;
+
+              // Handle Player Shooting
+              if (msg.shooting) {
+                const now = Date.now();
+                const wStats = WEAPON_DEFS[p.weapon as WeaponType] || WEAPON_DEFS.plasma;
+                const cooldownMs = 1000 / wStats.fireRate;
+
+                if (!clientConn.lastShotTime || now - clientConn.lastShotTime >= cooldownMs) {
+                  clientConn.lastShotTime = now;
+
+                  for (let i = 0; i < wStats.pellets; i++) {
+                    const angleOffset = (Math.random() - 0.5) * wStats.spread;
+                    const finalAngle = msg.aimAngle + angleOffset;
+
+                    islandState.projectiles.push({
+                      id: `proj_${now}_${Math.random().toString(36).substring(2, 6)}`,
+                      ownerId: p.id,
+                      isEnemy: false,
+                      x: p.x,
+                      y: p.y,
+                      vx: Math.cos(finalAngle) * wStats.projectileSpeed,
+                      vy: Math.sin(finalAngle) * wStats.projectileSpeed,
+                      damage: wStats.damage,
+                      radius: p.weapon === 'rocket' ? 8 : p.weapon === 'railgun' ? 6 : 4,
+                      color: wStats.color,
+                      pierce: p.weapon === 'railgun' ? 4 : 1,
+                      life: p.weapon === 'rocket' ? 2.5 : 1.8,
+                      isExplosive: p.weapon === 'rocket',
+                      explosionRadius: p.weapon === 'rocket' ? 90 : 0,
+                    });
+                  }
+                }
+              }
             }
             break;
           }
@@ -272,28 +308,22 @@ export function setupMultiplayerServer(server: HttpServer) {
             const text = msg.text.trim().substring(0, 180);
             const chatMsg: ChatMessage = {
               id: `chat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-              senderId: clientConn.playerId,
+              senderId: playerId,
               senderName: clientConn.username,
               text,
               timestamp: Date.now(),
               channel: msg.channel || 'nearby',
             };
 
-            const p = islandPlayers.get(clientConn.playerId);
-            if (p) {
-              p.lastChat = { text, timestamp: Date.now() };
-            }
+            const p = islandState.players[playerId];
+            if (p) p.lastChat = { text, timestamp: Date.now() };
 
-            if (clientConn.roomId) {
-              broadcastRoom(clientConn.roomId, { type: 'chat_broadcast', message: chatMsg });
-            } else {
-              broadcastAll({ type: 'chat_broadcast', message: chatMsg });
-            }
+            broadcastAll({ type: 'chat_broadcast', message: chatMsg });
             break;
           }
 
           case 'emote': {
-            const p = islandPlayers.get(clientConn.playerId);
+            const p = islandState.players[playerId];
             const emoteSymbols: Record<EmoteType, { symbol: string; label: string }> = {
               wave: { symbol: '[Wave]', label: 'waved hello!' },
               laugh: { symbol: '[Laugh]', label: 'laughs out loud!' },
@@ -311,7 +341,7 @@ export function setupMultiplayerServer(server: HttpServer) {
 
             broadcastAll({
               type: 'emote_broadcast',
-              playerId: clientConn.playerId,
+              playerId,
               emote: msg.emote,
               symbol: emoteInfo.symbol,
               label: emoteInfo.label,
@@ -319,214 +349,249 @@ export function setupMultiplayerServer(server: HttpServer) {
             break;
           }
 
-          case 'create_room': {
-            // Leave any prior room cleanly first
-            leaveCurrentRoom(clientConn);
+          case 'build_structure': {
+            const pad = islandState.buildPads.find((p) => p.id === msg.padId);
+            if (!pad) {
+              sendTo(ws, { type: 'error', message: 'Build pad not found.' });
+              return;
+            }
+            if (pad.structureId) {
+              sendTo(ws, { type: 'error', message: 'Pad already has a structure.' });
+              return;
+            }
 
-            const roomId = `room_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 5)}`;
-            const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
+            const sDef = STRUCTURE_DEFS[msg.structureType];
+            if (!sDef) return;
 
-            const hostPlayer: RoomPlayer = {
-              id: clientConn.playerId,
-              username: clientConn.username,
-              isHost: true,
-              isReady: true,
-              weapon: 'plasma',
-              avatarColor: islandPlayers.get(clientConn.playerId)?.avatar.bodyColor || '#3b82f6',
+            if (islandState.sharedResources.scrap < sDef.cost) {
+              sendTo(ws, {
+                type: 'error',
+                message: `Not enough Scrap! Need ${sDef.cost} Scrap (You have ${islandState.sharedResources.scrap}).`,
+              });
+              return;
+            }
+
+            islandState.sharedResources.scrap -= sDef.cost;
+
+            const structId = `struct_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+            const newStruct: DefensiveStructure = {
+              id: structId,
+              padId: pad.id,
+              type: msg.structureType,
+              x: pad.x,
+              y: pad.y,
+              hp: sDef.maxHp,
+              maxHp: sDef.maxHp,
+              level: 1,
+              range: sDef.range,
+              damage: sDef.damage,
+              fireRate: sDef.fireRate,
+              cooldown: 0,
+              color: sDef.color,
+              builderId: playerId,
             };
 
-            const newRoom: GameRoom = {
-              id: roomId,
-              roomCode,
-              gameId: msg.gameId || 'void_horde',
-              name: msg.name || `${clientConn.username}'s Squad`,
-              hostId: clientConn.playerId,
-              maxPlayers: Math.min(Math.max(msg.maxPlayers || 4, 1), 4),
-              players: [hostPlayer],
-              state: 'lobby',
-              createdAt: Date.now(),
-            };
+            pad.structureId = structId;
+            islandState.structures.push(newStruct);
 
-            rooms.set(roomId, newRoom);
-            clientConn.roomId = roomId;
-
-            sendTo(ws, { type: 'room_joined', room: newRoom, player: hostPlayer });
-            if (msg.autoStart) {
-              startMatchInRoom(newRoom);
-            } else {
-              broadcastAll({ type: 'rooms_updated', rooms: getCleanRoomsList() });
-            }
-            break;
-          }
-
-          case 'join_room': {
-            const room = rooms.get(msg.roomId);
-            if (!room) {
-              sendTo(ws, { type: 'error', message: 'Room not found.' });
-              return;
-            }
-            if (room.players.length >= room.maxPlayers) {
-              sendTo(ws, { type: 'error', message: 'Room is full.' });
-              return;
-            }
-            if (room.state !== 'lobby') {
-              sendTo(ws, { type: 'error', message: 'Match already in progress.' });
-              return;
-            }
-
-            // Leave old room if in one
-            leaveCurrentRoom(clientConn);
-
-            const roomPlayer: RoomPlayer = {
-              id: clientConn.playerId,
-              username: clientConn.username,
-              isHost: false,
-              isReady: false,
-              weapon: 'plasma',
-              avatarColor: islandPlayers.get(clientConn.playerId)?.avatar.bodyColor || '#10b981',
-            };
-
-            room.players.push(roomPlayer);
-            clientConn.roomId = room.id;
-
-            sendTo(ws, { type: 'room_joined', room, player: roomPlayer });
-            broadcastRoom(room.id, { type: 'room_updated', room });
-            broadcastAll({ type: 'rooms_updated', rooms: getCleanRoomsList() });
-            break;
-          }
-
-          case 'leave_room': {
-            leaveCurrentRoom(clientConn);
-            sendTo(ws, { type: 'room_left' });
-            broadcastAll({ type: 'rooms_updated', rooms: getCleanRoomsList() });
-            break;
-          }
-
-          case 'toggle_ready': {
-            if (!clientConn.roomId) return;
-            const room = rooms.get(clientConn.roomId);
-            if (room) {
-              const rp = room.players.find((p) => p.id === clientConn.playerId);
-              if (rp) {
-                rp.isReady = !rp.isReady;
-                if (msg.weapon) rp.weapon = msg.weapon;
-                broadcastRoom(room.id, { type: 'room_updated', room });
-              }
-            }
-            break;
-          }
-
-          case 'select_weapon': {
-            if (!clientConn.roomId) return;
-            const room = rooms.get(clientConn.roomId);
-            if (room) {
-              const rp = room.players.find((p) => p.id === clientConn.playerId);
-              if (rp) {
-                rp.weapon = msg.weapon;
-                broadcastRoom(room.id, { type: 'room_updated', room });
-              }
-            }
-            break;
-          }
-
-          case 'start_game': {
-            if (!clientConn.roomId) return;
-            const room = rooms.get(clientConn.roomId);
-            if (!room) return;
-            if (room.hostId !== clientConn.playerId) {
-              sendTo(ws, { type: 'error', message: 'Only the squad host can launch the match.' });
-              return;
-            }
-            const unreadyPlayers = room.players.filter((p) => !p.isReady);
-            if (unreadyPlayers.length > 0) {
-              sendTo(ws, { type: 'error', message: `Cannot launch match: ${unreadyPlayers.map((p) => p.username).join(', ')} not ready.` });
-              return;
-            }
-
-            startMatchInRoom(room);
-            break;
-          }
-
-          case 'vh_player_input': {
-            if (!clientConn.roomId) return;
-            const vhState = vhStates.get(clientConn.roomId);
-            if (!vhState) return;
-
-            const player = vhState.players[clientConn.playerId];
-            if (!player || !player.isAlive) return;
-
-            // Update player position
-            player.x = Math.max(50, Math.min(1950, msg.x));
-            player.y = Math.max(50, Math.min(1950, msg.y));
-            player.vx = msg.vx;
-            player.vy = msg.vy;
-
-            // Handle shooting
-            if (msg.shooting) {
-              const now = Date.now();
-              const wStats = WEAPON_DEFS[player.weapon] || WEAPON_DEFS.plasma;
-              const cooldownMs = 1000 / wStats.fireRate;
-
-              if (!clientConn.lastShotTime || now - clientConn.lastShotTime >= cooldownMs) {
-                clientConn.lastShotTime = now;
-
-                for (let i = 0; i < wStats.pellets; i++) {
-                  const angleOffset = (Math.random() - 0.5) * wStats.spread;
-                  const finalAngle = msg.aimAngle + angleOffset;
-
-                  vhState.projectiles.push({
-                    id: `proj_${now}_${Math.random().toString(36).substring(2, 6)}`,
-                    ownerId: player.id,
-                    isEnemy: false,
-                    x: player.x,
-                    y: player.y,
-                    vx: Math.cos(finalAngle) * wStats.projectileSpeed,
-                    vy: Math.sin(finalAngle) * wStats.projectileSpeed,
-                    damage: wStats.damage,
-                    radius: player.weapon === 'railgun' ? 6 : 4,
-                    color: wStats.color,
-                    pierce: player.weapon === 'railgun' ? 4 : 1,
-                    life: 1.8,
-                  });
-                }
-              }
-            }
-            break;
-          }
-
-          case 'vh_select_upgrade': {
-            if (!clientConn.roomId) return;
-            const vhState = vhStates.get(clientConn.roomId);
-            if (!vhState || vhState.waveState !== 'intermission') return;
-
-            const p = vhState.players[clientConn.playerId];
-            if (p && !p.hasSelectedUpgrade) {
-              p.hasSelectedUpgrade = true;
-              if (msg.upgradeId === 'core_shield') {
-                vhState.core.maxHp += 200;
-                vhState.core.hp = Math.min(vhState.core.maxHp, vhState.core.hp + 300);
-                vhState.core.shield = vhState.core.maxShield;
-              } else if (msg.upgradeId === 'player_hp') {
-                p.maxHp += 40;
-                p.hp = p.maxHp;
-                p.maxShield += 25;
-                p.shield = p.maxShield;
-              } else if (msg.upgradeId === 'turret_drone') {
-                p.turretUnlocked = true;
-              }
-            }
-            break;
-          }
-
-          case 'return_to_island': {
-            leaveCurrentRoom(clientConn);
-            sendTo(ws, {
-              type: 'init_client',
-              playerId: clientConn.playerId,
-              islandPlayers: Array.from(islandPlayers.values()),
-              rooms: getCleanRoomsList(),
+            islandState.damageTexts.push({
+              id: `dt_${Date.now()}_${Math.random()}`,
+              x: pad.x,
+              y: pad.y - 30,
+              text: `BUILT ${sDef.name.toUpperCase()}!`,
+              color: '#38bdf8',
+              life: 1.5,
             });
-            broadcastAll({ type: 'rooms_updated', rooms: getCleanRoomsList() });
+            break;
+          }
+
+          case 'upgrade_structure': {
+            const struct = islandState.structures.find((s) => s.id === msg.structureId);
+            if (!struct) return;
+            if (struct.level >= 3) {
+              sendTo(ws, { type: 'error', message: 'Structure already at MAX Level 3.' });
+              return;
+            }
+
+            const cost = struct.level * 150;
+            if (islandState.sharedResources.scrap < cost) {
+              sendTo(ws, { type: 'error', message: `Not enough Scrap to upgrade! Need ${cost} Scrap.` });
+              return;
+            }
+
+            islandState.sharedResources.scrap -= cost;
+            struct.level += 1;
+            struct.maxHp += 150;
+            struct.hp = struct.maxHp;
+            struct.damage = Math.round(struct.damage * 1.35);
+            struct.range = Math.round(struct.range * 1.15);
+
+            islandState.damageTexts.push({
+              id: `dt_${Date.now()}_${Math.random()}`,
+              x: struct.x,
+              y: struct.y - 30,
+              text: `UPGRADED TO LVL ${struct.level}!`,
+              color: '#facc15',
+              life: 1.5,
+            });
+            break;
+          }
+
+          case 'repair_structure': {
+            const struct = islandState.structures.find((s) => s.id === msg.structureId);
+            if (!struct) return;
+            if (struct.hp >= struct.maxHp) {
+              sendTo(ws, { type: 'error', message: 'Structure is already at 100% health.' });
+              return;
+            }
+
+            const repairCost = 35;
+            if (islandState.sharedResources.scrap < repairCost) {
+              sendTo(ws, { type: 'error', message: `Need ${repairCost} Scrap to repair structure.` });
+              return;
+            }
+
+            islandState.sharedResources.scrap -= repairCost;
+            struct.hp = struct.maxHp;
+
+            islandState.damageTexts.push({
+              id: `dt_${Date.now()}_${Math.random()}`,
+              x: struct.x,
+              y: struct.y - 30,
+              text: 'REPAIRED +100%',
+              color: '#34d399',
+              life: 1.2,
+            });
+            break;
+          }
+
+          case 'upgrade_core': {
+            const cost = 250 * islandState.core.level;
+            if (islandState.sharedResources.energy < cost) {
+              sendTo(ws, { type: 'error', message: `Need ${cost} Void Energy to upgrade Core.` });
+              return;
+            }
+
+            islandState.sharedResources.energy -= cost;
+            islandState.core.level += 1;
+
+            if (msg.upgradeType === 'health') {
+              islandState.core.maxHp += 400;
+              islandState.core.hp = islandState.core.maxHp;
+            } else if (msg.upgradeType === 'shield') {
+              islandState.core.maxShield += 300;
+              islandState.core.shield = islandState.core.maxShield;
+            }
+
+            islandState.damageTexts.push({
+              id: `dt_${Date.now()}_${Math.random()}`,
+              x: islandState.core.x,
+              y: islandState.core.y - 40,
+              text: `CORE UPGRADED TO LVL ${islandState.core.level}!`,
+              color: '#a855f7',
+              life: 2.0,
+            });
+            break;
+          }
+
+          case 'buy_weapon': {
+            const p = islandState.players[playerId];
+            if (!p) return;
+
+            const wStats = WEAPON_DEFS[msg.weapon];
+            if (!wStats) return;
+
+            if (p.weapon === msg.weapon) return;
+
+            if (islandState.sharedResources.energy < wStats.cost) {
+              sendTo(ws, { type: 'error', message: `Need ${wStats.cost} Void Energy to equip ${wStats.name}.` });
+              return;
+            }
+
+            islandState.sharedResources.energy -= wStats.cost;
+            p.weapon = msg.weapon;
+
+            islandState.damageTexts.push({
+              id: `dt_${Date.now()}_${Math.random()}`,
+              x: p.x,
+              y: p.y - 30,
+              text: `EQUIPPED ${wStats.name.toUpperCase()}!`,
+              color: '#38bdf8',
+              life: 1.5,
+            });
+            break;
+          }
+
+          case 'trigger_next_wave': {
+            if (islandState.phase === 'peaceful') {
+              islandState.phase = 'warning';
+              islandState.phaseTimer = 8;
+              broadcastAll({ type: 'island_event', eventType: 'wave_warning' });
+            }
+            break;
+          }
+
+          case 'ping_location': {
+            const ping: PingMarker = {
+              id: `ping_${Date.now()}_${Math.random()}`,
+              x: msg.x,
+              y: msg.y,
+              type: msg.pingType,
+              senderName: clientConn.username,
+              timestamp: Date.now(),
+              life: 6.0,
+            };
+            islandState.pings.push(ping);
+            broadcastAll({ type: 'ping_broadcast', ping });
+            break;
+          }
+
+          case 'revive_player': {
+            const targetP = islandState.players[msg.targetPlayerId];
+            if (targetP && targetP.isDowned) {
+              targetP.reviveProgress = (targetP.reviveProgress || 0) + 30;
+              if (targetP.reviveProgress >= 100) {
+                targetP.isDowned = false;
+                targetP.hp = Math.round(targetP.maxHp * 0.5);
+                targetP.shield = targetP.maxShield;
+                targetP.reviveProgress = 0;
+
+                islandState.damageTexts.push({
+                  id: `dt_${Date.now()}_${Math.random()}`,
+                  x: targetP.x,
+                  y: targetP.y - 30,
+                  text: 'REVIVED!',
+                  color: '#34d399',
+                  life: 1.5,
+                });
+              }
+            }
+            break;
+          }
+
+          case 'restart_game': {
+            if (islandState.phase === 'defeat' || islandState.phase === 'victory') {
+              islandState.wave = 1;
+              islandState.phase = 'peaceful';
+              islandState.phaseTimer = 25;
+              islandState.core.hp = islandState.core.maxHp;
+              islandState.core.shield = islandState.core.maxShield;
+              islandState.enemies = [];
+              islandState.projectiles = [];
+              islandState.resourceDrops = [];
+              islandState.sharedResources = { energy: 400, scrap: 500 };
+
+              Object.values(islandState.players).forEach((p) => {
+                p.hp = p.maxHp;
+                p.shield = p.maxShield;
+                p.isAlive = true;
+                p.isDowned = false;
+                p.x = 1200 + (Math.random() * 80 - 40);
+                p.y = 1200 + (Math.random() * 80 - 40);
+              });
+
+              broadcastAll({ type: 'island_state_sync', islandState });
+            }
             break;
           }
         }
@@ -536,126 +601,156 @@ export function setupMultiplayerServer(server: HttpServer) {
     });
 
     ws.on('close', () => {
-      islandPlayers.delete(clientConn.playerId);
-      leaveCurrentRoom(clientConn);
+      delete islandState.players[playerId];
       clients.delete(ws);
-      broadcastAll({ type: 'player_left_island', playerId: clientConn.playerId });
-      broadcastAll({ type: 'rooms_updated', rooms: getCleanRoomsList() });
+      broadcastAll({ type: 'player_left_island', playerId });
     });
   });
 
-  // Server Ticks
-  // 1. Island Tick (20 Hz)
+  // Server Main Loop (30 Hz)
+  const dt = 1 / 30;
   setInterval(() => {
-    // Ambient Bot simple movement logic
     const now = Date.now();
+
+    // 1. Ambient Bot movement & speech during peaceful phases
     botConfigs.forEach((bot) => {
-      const p = islandPlayers.get(bot.id);
+      const p = islandState.players[bot.id];
       if (p) {
-        p.x += Math.sin(now / 1500 + (bot.id === 'bot_nova' ? 0 : 2)) * 0.8;
-        p.y += Math.cos(now / 1500 + (bot.id === 'bot_nova' ? 0 : 2)) * 0.8;
+        p.x += Math.sin(now / 1800 + (bot.id === 'bot_nova' ? 0 : 3)) * 0.6;
+        p.y += Math.cos(now / 1800 + (bot.id === 'bot_nova' ? 0 : 3)) * 0.6;
       }
     });
 
-    broadcastAll({
-      type: 'island_state_sync',
-      players: Array.from(islandPlayers.values()),
-    });
-  }, 50);
+    // 2. Island Phase State Machine
+    if (islandState.phaseTimer > 0) {
+      islandState.phaseTimer -= dt;
 
-  // 2. Void Horde Match Loop (30 Hz)
-  const dt = 1 / 30;
-  setInterval(() => {
-    vhStates.forEach((vhState, roomId) => {
-      if (vhState.waveState === 'victory' || vhState.waveState === 'defeat') return;
-
-      // Wave state timer logic
-      if (vhState.waveTimer > 0) {
-        vhState.waveTimer -= dt;
-        if (vhState.waveTimer <= 0) {
-          if (vhState.waveState === 'preparing') {
-            vhState.waveState = 'spawning';
-            broadcastRoom(roomId, { type: 'vh_event', eventType: 'wave_start', data: { wave: vhState.wave } });
-          } else if (vhState.waveState === 'intermission') {
-            vhState.wave += 1;
-            if (vhState.wave === vhState.maxWaves) {
-              vhState.waveState = 'boss';
-              vhState.waveTimer = 3;
-              // Spawn Boss Void Overlord
-              vhState.enemies.push({
-                id: `boss_overlord_${Date.now()}`,
-                type: 'overlord',
-                x: 1000,
-                y: 200,
-                vx: 0,
-                vy: 0,
-                hp: 3500,
-                maxHp: 3500,
-                speed: 60,
-                radius: 50,
-                damage: 40,
-                color: '#dc2626',
-                attackCooldown: 0,
-                targetType: 'core',
-                isBoss: true,
-              });
-              broadcastRoom(roomId, { type: 'vh_event', eventType: 'boss_spawn' });
-            } else {
-              vhState.waveState = 'preparing';
-              vhState.waveTimer = 4;
-            }
+      if (islandState.phaseTimer <= 0) {
+        if (islandState.phase === 'peaceful') {
+          islandState.phase = 'warning';
+          islandState.phaseTimer = 10;
+          broadcastAll({ type: 'island_event', eventType: 'wave_warning', data: { wave: islandState.wave } });
+        } else if (islandState.phase === 'warning') {
+          islandState.phase = 'defense';
+          broadcastAll({ type: 'island_event', eventType: 'wave_start', data: { wave: islandState.wave } });
+        } else if (islandState.phase === 'intermission') {
+          islandState.wave += 1;
+          if (islandState.wave > islandState.maxWaves) {
+            islandState.phase = 'victory';
+            broadcastAll({ type: 'island_event', eventType: 'victory' });
+          } else {
+            islandState.phase = 'peaceful';
+            islandState.phaseTimer = 30;
           }
         }
       }
+    }
 
-      // Enemy Spawner in 'spawning' wave state
-      if (vhState.waveState === 'spawning') {
-        const totalEnemiesTarget = vhState.wave * 12 + 8;
-        if (vhState.enemies.length < totalEnemiesTarget && Math.random() < 0.2) {
-          const spawnAngle = Math.random() * Math.PI * 2;
-          const dist = 950;
-          const sx = 1000 + Math.cos(spawnAngle) * dist;
-          const sy = 1000 + Math.sin(spawnAngle) * dist;
+    // Passive Core & Player Shield Regeneration in Peaceful Phase
+    if (islandState.phase === 'peaceful') {
+      islandState.core.hp = Math.min(islandState.core.maxHp, islandState.core.hp + 20 * dt);
+      islandState.core.shield = Math.min(islandState.core.maxShield, islandState.core.shield + 25 * dt);
 
-          const rand = Math.random();
-          let eType: EnemyEntity['type'] = 'swarmer';
-          let hp = 60 + vhState.wave * 15;
-          let speed = 110 + Math.random() * 20;
-          let radius = 14;
-          let color = '#ef4444';
-          let damage = 12;
+      Object.values(islandState.players).forEach((p) => {
+        if (!p.isDowned) {
+          p.hp = Math.min(p.maxHp, p.hp + 15 * dt);
+          p.shield = Math.min(p.maxShield, p.shield + 20 * dt);
+        }
+      });
 
-          if (rand > 0.82 && vhState.wave >= 6) {
+      // Spawn periodic ambient resource deposits on island
+      if (Math.random() < 0.05 && islandState.resourceDrops.length < 15) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 200 + Math.random() * 700;
+        islandState.resourceDrops.push({
+          id: `res_${Date.now()}_${Math.random()}`,
+          type: Math.random() < 0.5 ? 'energy' : 'scrap',
+          amount: Math.floor(25 + Math.random() * 35),
+          x: 1200 + Math.cos(angle) * dist,
+          y: 1200 + Math.sin(angle) * dist,
+          life: 40.0,
+        });
+      }
+    }
+
+    // 3. Enemy Spawner in 'defense' phase
+    if (islandState.phase === 'defense') {
+      const targetEnemyCount = islandState.wave * 12 + 6;
+
+      if (islandState.enemies.length < targetEnemyCount && Math.random() < 0.25) {
+        // Pick breach portal based on wave
+        const breachIndex = Math.floor(Math.random() * islandState.activeBreaches.length);
+        const breach = islandState.activeBreaches[breachIndex];
+
+        const sx = breach.x + (Math.random() * 60 - 30);
+        const sy = breach.y + (Math.random() * 60 - 30);
+
+        const rand = Math.random();
+        let eType: EnemyEntity['type'] = 'swarmer';
+        let hp = 70 + islandState.wave * 18;
+        let speed = 120 + Math.random() * 20;
+        let radius = 15;
+        let color = '#ef4444';
+        let damage = 14;
+
+        if (islandState.wave === 10 && !islandState.enemies.some((e) => e.isBoss)) {
+          // Spawn Boss Void Overlord on Wave 10
+          eType = 'overlord';
+          hp = 4500;
+          speed = 60;
+          radius = 55;
+          color = '#a855f7';
+          damage = 50;
+          islandState.enemies.push({
+            id: `boss_overlord_${Date.now()}`,
+            type: eType,
+            x: sx,
+            y: sy,
+            vx: 0,
+            vy: 0,
+            hp,
+            maxHp: hp,
+            speed,
+            radius,
+            damage,
+            color,
+            attackCooldown: 0,
+            targetType: 'core',
+            isBoss: true,
+          });
+          broadcastAll({ type: 'island_event', eventType: 'boss_spawn' });
+        } else {
+          if (rand > 0.82 && islandState.wave >= 5) {
             eType = 'commander';
-            hp = 320 + vhState.wave * 40;
+            hp = 350 + islandState.wave * 45;
             speed = 70;
-            radius = 24;
+            radius = 26;
             color = '#a855f7';
-            damage = 25;
-          } else if (rand > 0.65 && vhState.wave >= 4) {
+            damage = 28;
+          } else if (rand > 0.65 && islandState.wave >= 3) {
             eType = 'tank';
-            hp = 250 + vhState.wave * 30;
-            speed = 55;
-            radius = 22;
+            hp = 280 + islandState.wave * 35;
+            speed = 60;
+            radius = 24;
             color = '#0284c7';
-            damage = 20;
-          } else if (rand > 0.45 && vhState.wave >= 2) {
+            damage = 22;
+          } else if (rand > 0.45 && islandState.wave >= 2) {
             eType = 'spitter';
-            hp = 90 + vhState.wave * 12;
-            speed = 85;
-            radius = 16;
+            hp = 100 + islandState.wave * 15;
+            speed = 90;
+            radius = 17;
             color = '#f59e0b';
+            damage = 16;
+          } else if (rand > 0.28) {
+            eType = 'runner';
+            hp = 85 + islandState.wave * 12;
+            speed = 165;
+            radius = 14;
+            color = '#e11d48';
             damage = 15;
-          } else if (rand > 0.25) {
-            eType = 'berserker';
-            hp = 120 + vhState.wave * 20;
-            speed = 130;
-            radius = 18;
-            color = '#dc2626';
-            damage = 18;
           }
 
-          vhState.enemies.push({
+          islandState.enemies.push({
             id: `e_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
             type: eType,
             x: sx,
@@ -669,222 +764,321 @@ export function setupMultiplayerServer(server: HttpServer) {
             damage,
             color,
             attackCooldown: 0,
-            targetType: Math.random() < 0.6 ? 'core' : 'player',
+            targetType: eType === 'runner' ? 'core' : Math.random() < 0.6 ? 'core' : 'player',
           });
-        }
-
-        // Check if wave cleared
-        if (vhState.enemies.length === 0 && vhState.waveTimer <= 0) {
-          vhState.waveState = 'intermission';
-          vhState.waveTimer = 10; // 10s intermission upgrade choice
-          Object.values(vhState.players).forEach((p) => {
-            p.hasSelectedUpgrade = false;
-          });
-          broadcastRoom(roomId, { type: 'vh_event', eventType: 'upgrade_phase' });
         }
       }
 
-      // Process Player Orbiting Turrets
-      Object.values(vhState.players).forEach((p) => {
-        if (p.isAlive && p.turretUnlocked) {
-          p.turretAngle = (p.turretAngle || 0) + dt * 3;
-          const tx = p.x + Math.cos(p.turretAngle) * 35;
-          const ty = p.y + Math.sin(p.turretAngle) * 35;
+      // Check if wave cleared
+      if (islandState.enemies.length === 0 && islandState.phaseTimer <= 0) {
+        islandState.phase = 'intermission';
+        islandState.phaseTimer = 12;
 
-          if (Math.random() < 0.15 && vhState.enemies.length > 0) {
-            const nearestE = vhState.enemies[0];
-            const aimAngle = Math.atan2(nearestE.y - ty, nearestE.x - tx);
-            vhState.projectiles.push({
-              id: `turret_proj_${Date.now()}_${Math.random()}`,
-              ownerId: p.id,
-              isEnemy: false,
-              x: tx,
-              y: ty,
-              vx: Math.cos(aimAngle) * 600,
-              vy: Math.sin(aimAngle) * 600,
-              damage: 20,
-              radius: 3,
-              color: '#38bdf8',
-              pierce: 1,
-              life: 1.2,
-            });
-          }
-        }
-      });
+        // Reward team resources
+        const energyReward = 150 + islandState.wave * 40;
+        const scrapReward = 200 + islandState.wave * 50;
+        islandState.sharedResources.energy += energyReward;
+        islandState.sharedResources.scrap += scrapReward;
 
-      // Update Enemies
-      vhState.enemies.forEach((enemy) => {
-        enemy.attackCooldown = Math.max(0, enemy.attackCooldown - dt);
-
-        // Determine target
-        let targetX = vhState.core.x;
-        let targetY = vhState.core.y;
-
-        if (enemy.targetType === 'player') {
-          const alivePlayers = Object.values(vhState.players).filter((p) => p.isAlive);
-          if (alivePlayers.length > 0) {
-            targetX = alivePlayers[0].x;
-            targetY = alivePlayers[0].y;
-          }
-        }
-
-        const dx = targetX - enemy.x;
-        const dy = targetY - enemy.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist > 10) {
-          enemy.vx = (dx / dist) * enemy.speed;
-          enemy.vy = (dy / dist) * enemy.speed;
-          enemy.x += enemy.vx * dt;
-          enemy.y += enemy.vy * dt;
-        }
-
-        // Enemy Attack Core
-        const coreDist = Math.sqrt(
-          (enemy.x - vhState.core.x) * (enemy.x - vhState.core.x) +
-            (enemy.y - vhState.core.y) * (enemy.y - vhState.core.y)
-        );
-
-        if (coreDist < enemy.radius + vhState.core.radius) {
-          if (enemy.attackCooldown <= 0) {
-            enemy.attackCooldown = 1.0;
-            const dmg = enemy.damage;
-            if (vhState.core.shield > 0) {
-              vhState.core.shield = Math.max(0, vhState.core.shield - dmg);
-            } else {
-              vhState.core.hp = Math.max(0, vhState.core.hp - dmg);
-            }
-
-            vhState.damageTexts.push({
-              id: `dt_${Date.now()}_${Math.random()}`,
-              x: vhState.core.x + (Math.random() * 40 - 20),
-              y: vhState.core.y - 30,
-              text: `-${dmg}`,
-              color: '#ef4444',
-              life: 1.0,
-            });
-
-            broadcastRoom(roomId, { type: 'vh_event', eventType: 'core_hit' });
-
-            if (vhState.core.hp <= 0) {
-              vhState.waveState = 'defeat';
-              broadcastRoom(roomId, { type: 'vh_event', eventType: 'defeat' });
-            }
-          }
-        }
-
-        // Enemy Attack Players
-        Object.values(vhState.players).forEach((p) => {
-          if (!p.isAlive) return;
-          const pDist = Math.sqrt((enemy.x - p.x) * (enemy.x - p.x) + (enemy.y - p.y) * (enemy.y - p.y));
-          if (pDist < enemy.radius + 18) {
-            if (enemy.attackCooldown <= 0) {
-              enemy.attackCooldown = 0.8;
-              if (p.shield > 0) {
-                p.shield = Math.max(0, p.shield - enemy.damage);
-              } else {
-                p.hp = Math.max(0, p.hp - enemy.damage);
-                if (p.hp <= 0) p.isAlive = false;
-              }
-            }
-          }
+        islandState.damageTexts.push({
+          id: `dt_${Date.now()}_${Math.random()}`,
+          x: islandState.core.x,
+          y: islandState.core.y - 50,
+          text: `WAVE ${islandState.wave} CLEARED! +${scrapReward} SCRAP`,
+          color: '#facc15',
+          life: 3.0,
         });
+
+        broadcastAll({ type: 'island_event', eventType: 'wave_complete', data: { wave: islandState.wave } });
+      }
+    }
+
+    // 4. Update Defensive Structures AI & Attacks
+    islandState.structures.forEach((struct) => {
+      struct.cooldown = Math.max(0, struct.cooldown - dt);
+
+      if (struct.type === 'repair_station') {
+        if (struct.cooldown <= 0) {
+          struct.cooldown = 1.0;
+          // Pulse repair to nearby damaged structures and Core
+          islandState.structures.forEach((other) => {
+            const dist = Math.hypot(other.x - struct.x, other.y - struct.y);
+            if (dist < struct.range && other.hp < other.maxHp) {
+              other.hp = Math.min(other.maxHp, other.hp + 30);
+            }
+          });
+
+          const coreDist = Math.hypot(islandState.core.x - struct.x, islandState.core.y - struct.y);
+          if (coreDist < struct.range && islandState.core.hp < islandState.core.maxHp) {
+            islandState.core.hp = Math.min(islandState.core.maxHp, islandState.core.hp + 20);
+          }
+        }
+      } else if (struct.type === 'slow_field') {
+        // Slow field applies aura directly to nearby enemies in distance checks
+      } else if (struct.type === 'auto_turret' || struct.type === 'heavy_cannon' || struct.type === 'laser_turret') {
+        if (struct.cooldown <= 0 && islandState.enemies.length > 0) {
+          // Find nearest enemy in range
+          let target: EnemyEntity | null = null;
+          let minDist = struct.range;
+
+          islandState.enemies.forEach((e) => {
+            const dist = Math.hypot(e.x - struct.x, e.y - struct.y);
+            if (dist < minDist) {
+              minDist = dist;
+              target = e;
+            }
+          });
+
+          if (target) {
+            struct.cooldown = 1 / struct.fireRate;
+            const aimAngle = Math.atan2((target as EnemyEntity).y - struct.y, (target as EnemyEntity).x - struct.x);
+
+            islandState.projectiles.push({
+              id: `turret_proj_${Date.now()}_${Math.random()}`,
+              ownerId: struct.id,
+              isEnemy: false,
+              x: struct.x,
+              y: struct.y,
+              vx: Math.cos(aimAngle) * 750,
+              vy: Math.sin(aimAngle) * 750,
+              damage: struct.damage,
+              radius: struct.type === 'heavy_cannon' ? 7 : 4,
+              color: struct.color,
+              pierce: struct.type === 'heavy_cannon' ? 2 : 1,
+              life: 1.5,
+              isExplosive: struct.type === 'heavy_cannon',
+              explosionRadius: struct.type === 'heavy_cannon' ? 80 : 0,
+            });
+          }
+        }
+      }
+    });
+
+    // 5. Update Enemies Logic & Pathfinding
+    for (let i = islandState.enemies.length - 1; i >= 0; i--) {
+      const enemy = islandState.enemies[i];
+      enemy.attackCooldown = Math.max(0, enemy.attackCooldown - dt);
+
+      // Check Slow Field modifiers
+      let currentSpeed = enemy.speed;
+      islandState.structures.forEach((s) => {
+        if (s.type === 'slow_field') {
+          const sDist = Math.hypot(enemy.x - s.x, enemy.y - s.y);
+          if (sDist < s.range) {
+            currentSpeed *= 0.5;
+          }
+        }
       });
 
-      // Update Projectiles & Collisions
-      for (let i = vhState.projectiles.length - 1; i >= 0; i--) {
-        const proj = vhState.projectiles[i];
-        proj.x += proj.vx * dt;
-        proj.y += proj.vy * dt;
-        proj.life -= dt;
+      // Target determination
+      let targetX = islandState.core.x;
+      let targetY = islandState.core.y;
 
-        if (proj.life <= 0 || proj.x < 0 || proj.x > 2000 || proj.y < 0 || proj.y > 2000) {
-          vhState.projectiles.splice(i, 1);
-          continue;
+      if (enemy.targetType === 'player') {
+        const alivePlayers = Object.values(islandState.players).filter((p) => p.isAlive && !p.isDowned);
+        if (alivePlayers.length > 0) {
+          targetX = alivePlayers[0].x;
+          targetY = alivePlayers[0].y;
         }
+      }
 
-        // Check Projectile vs Enemy
-        if (!proj.isEnemy) {
-          for (let j = vhState.enemies.length - 1; j >= 0; j--) {
-            const enemy = vhState.enemies[j];
-            const edx = enemy.x - proj.x;
-            const edy = enemy.y - proj.y;
-            const edist = Math.sqrt(edx * edx + edy * edy);
+      const dx = targetX - enemy.x;
+      const dy = targetY - enemy.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-            if (edist < enemy.radius + proj.radius) {
-              const isCrit = Math.random() < 0.2;
-              const dmg = isCrit ? Math.round(proj.damage * 1.5) : proj.damage;
-              enemy.hp -= dmg;
+      if (dist > 15) {
+        enemy.vx = (dx / dist) * currentSpeed;
+        enemy.vy = (dy / dist) * currentSpeed;
+        enemy.x += enemy.vx * dt;
+        enemy.y += enemy.vy * dt;
+      }
 
-              const shooter = vhState.players[proj.ownerId];
-              if (shooter) shooter.damageDealt += dmg;
+      // Enemy Attacks Core
+      const coreDist = Math.hypot(enemy.x - islandState.core.x, enemy.y - islandState.core.y);
+      if (coreDist < enemy.radius + islandState.core.radius) {
+        if (enemy.attackCooldown <= 0) {
+          enemy.attackCooldown = 1.0;
+          const dmg = enemy.damage;
+          if (islandState.core.shield > 0) {
+            islandState.core.shield = Math.max(0, islandState.core.shield - dmg);
+          } else {
+            islandState.core.hp = Math.max(0, islandState.core.hp - dmg);
+          }
 
-              vhState.damageTexts.push({
-                id: `dt_${Date.now()}_${Math.random()}`,
-                x: enemy.x + (Math.random() * 20 - 10),
-                y: enemy.y - 15,
-                text: `${dmg}`,
-                color: isCrit ? '#facc15' : '#ffffff',
-                life: 0.8,
-                isCrit,
-              });
+          islandState.damageTexts.push({
+            id: `dt_${Date.now()}_${Math.random()}`,
+            x: islandState.core.x + (Math.random() * 40 - 20),
+            y: islandState.core.y - 30,
+            text: `-${dmg}`,
+            color: '#ef4444',
+            life: 1.0,
+          });
 
-              // Create hit particles
-              vhState.particles.push({
-                x: proj.x,
-                y: proj.y,
-                vx: (Math.random() - 0.5) * 120,
-                vy: (Math.random() - 0.5) * 120,
-                color: proj.color,
-                radius: 3,
-                life: 0.3,
-                maxLife: 0.3,
-              });
+          broadcastAll({ type: 'island_event', eventType: 'core_hit' });
 
-              proj.pierce -= 1;
-              if (proj.pierce <= 0) {
-                vhState.projectiles.splice(i, 1);
-              }
-
-              if (enemy.hp <= 0) {
-                if (shooter) {
-                  shooter.kills += 1;
-                  shooter.score += enemy.isBoss ? 2000 : enemy.isElite ? 500 : 100;
-                }
-                vhState.score += enemy.isBoss ? 2000 : enemy.isElite ? 500 : 100;
-                vhState.totalKills += 1;
-
-                if (enemy.isBoss) {
-                  vhState.waveState = 'victory';
-                  broadcastRoom(roomId, { type: 'vh_event', eventType: 'victory' });
-                }
-
-                vhState.enemies.splice(j, 1);
-              }
-              break;
-            }
+          if (islandState.core.hp <= 0) {
+            islandState.phase = 'defeat';
+            broadcastAll({ type: 'island_event', eventType: 'defeat' });
           }
         }
       }
 
-      // Update Particles & Damage Texts
-      for (let i = vhState.particles.length - 1; i >= 0; i--) {
-        const pt = vhState.particles[i];
-        pt.x += pt.vx * dt;
-        pt.y += pt.vy * dt;
-        pt.life -= dt;
-        if (pt.life <= 0) vhState.particles.splice(i, 1);
+      // Enemy Attacks Structures
+      islandState.structures.forEach((struct) => {
+        const sDist = Math.hypot(enemy.x - struct.x, enemy.y - struct.y);
+        if (sDist < enemy.radius + 24 && enemy.attackCooldown <= 0) {
+          enemy.attackCooldown = 0.9;
+          struct.hp -= enemy.damage;
+
+          if (struct.hp <= 0) {
+            const pad = islandState.buildPads.find((p) => p.id === struct.padId);
+            if (pad) pad.structureId = undefined;
+            broadcastAll({ type: 'island_event', eventType: 'structure_destroyed' });
+          }
+        }
+      });
+
+      // Filter destroyed structures
+      islandState.structures = islandState.structures.filter((s) => s.hp > 0);
+
+      // Enemy Attacks Players
+      Object.values(islandState.players).forEach((p) => {
+        if (!p.isAlive || p.isDowned) return;
+        const pDist = Math.hypot(enemy.x - p.x, enemy.y - p.y);
+        if (pDist < enemy.radius + 18 && enemy.attackCooldown <= 0) {
+          enemy.attackCooldown = 0.8;
+          if (p.shield > 0) {
+            p.shield = Math.max(0, p.shield - enemy.damage);
+          } else {
+            p.hp = Math.max(0, p.hp - enemy.damage);
+            if (p.hp <= 0) {
+              p.isDowned = true;
+              p.reviveProgress = 0;
+            }
+          }
+        }
+      });
+    }
+
+    // 6. Update Projectiles & Hits
+    for (let i = islandState.projectiles.length - 1; i >= 0; i--) {
+      const proj = islandState.projectiles[i];
+      proj.x += proj.vx * dt;
+      proj.y += proj.vy * dt;
+      proj.life -= dt;
+
+      if (proj.life <= 0 || proj.x < 0 || proj.x > 2400 || proj.y < 0 || proj.y > 2400) {
+        islandState.projectiles.splice(i, 1);
+        continue;
       }
 
-      for (let i = vhState.damageTexts.length - 1; i >= 0; i--) {
-        const dtObj = vhState.damageTexts[i];
-        dtObj.y -= 25 * dt;
-        dtObj.life -= dt;
-        if (dtObj.life <= 0) vhState.damageTexts.splice(i, 1);
-      }
+      // Check Projectile vs Enemy
+      if (!proj.isEnemy) {
+        for (let j = islandState.enemies.length - 1; j >= 0; j--) {
+          const enemy = islandState.enemies[j];
+          const edist = Math.hypot(enemy.x - proj.x, enemy.y - proj.y);
 
-      // Sync state to room clients
-      broadcastRoom(roomId, { type: 'vh_state_sync', vhState });
-    });
+          if (edist < enemy.radius + proj.radius) {
+            const isCrit = Math.random() < 0.22;
+            const dmg = isCrit ? Math.round(proj.damage * 1.5) : proj.damage;
+            enemy.hp -= dmg;
+
+            const shooter = islandState.players[proj.ownerId];
+            if (shooter) shooter.damageDealt += dmg;
+
+            islandState.damageTexts.push({
+              id: `dt_${Date.now()}_${Math.random()}`,
+              x: enemy.x + (Math.random() * 20 - 10),
+              y: enemy.y - 15,
+              text: `${dmg}`,
+              color: isCrit ? '#facc15' : '#ffffff',
+              life: 0.8,
+              isCrit,
+            });
+
+            // Handle Explosive Rockets
+            if (proj.isExplosive && proj.explosionRadius) {
+              islandState.enemies.forEach((otherE) => {
+                const splashDist = Math.hypot(otherE.x - proj.x, otherE.y - proj.y);
+                if (splashDist < proj.explosionRadius! && otherE.id !== enemy.id) {
+                  otherE.hp -= Math.round(dmg * 0.7);
+                }
+              });
+            }
+
+            proj.pierce -= 1;
+            if (proj.pierce <= 0) {
+              islandState.projectiles.splice(i, 1);
+            }
+
+            if (enemy.hp <= 0) {
+              if (shooter) {
+                shooter.kills += 1;
+                shooter.score += enemy.isBoss ? 3000 : enemy.isElite ? 600 : 120;
+              }
+              islandState.teamScore += enemy.isBoss ? 3000 : enemy.isElite ? 600 : 120;
+              islandState.totalKills += 1;
+
+              // Drop Resources upon enemy death
+              islandState.resourceDrops.push({
+                id: `res_${Date.now()}_${Math.random()}`,
+                type: Math.random() < 0.5 ? 'energy' : 'scrap',
+                amount: enemy.isBoss ? 200 : enemy.isElite ? 80 : 25,
+                x: enemy.x,
+                y: enemy.y,
+                life: 30.0,
+              });
+
+              if (enemy.isBoss) {
+                islandState.phase = 'victory';
+                broadcastAll({ type: 'island_event', eventType: 'victory' });
+              }
+
+              islandState.enemies.splice(j, 1);
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    // 7. Auto Collect Resource Drops when players are nearby
+    for (let i = islandState.resourceDrops.length - 1; i >= 0; i--) {
+      const drop = islandState.resourceDrops[i];
+      drop.life -= dt;
+
+      let collected = false;
+      Object.values(islandState.players).forEach((p) => {
+        if (!p.isDowned && Math.hypot(p.x - drop.x, p.y - drop.y) < 55) {
+          collected = true;
+          if (drop.type === 'energy') {
+            islandState.sharedResources.energy += drop.amount;
+          } else {
+            islandState.sharedResources.scrap += drop.amount;
+          }
+        }
+      });
+
+      if (collected || drop.life <= 0) {
+        islandState.resourceDrops.splice(i, 1);
+      }
+    }
+
+    // 8. Decay Damage Texts & Pings
+    for (let i = islandState.damageTexts.length - 1; i >= 0; i--) {
+      const dtObj = islandState.damageTexts[i];
+      dtObj.y -= 25 * dt;
+      dtObj.life -= dt;
+      if (dtObj.life <= 0) islandState.damageTexts.splice(i, 1);
+    }
+
+    for (let i = islandState.pings.length - 1; i >= 0; i--) {
+      const ping = islandState.pings[i];
+      ping.life -= dt;
+      if (ping.life <= 0) islandState.pings.splice(i, 1);
+    }
+
+    // 9. Sync full island state to clients at 30 Hz
+    broadcastAll({ type: 'island_state_sync', islandState });
   }, 1000 / 30);
 }

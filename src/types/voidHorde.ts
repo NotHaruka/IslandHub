@@ -1,4 +1,6 @@
-export type WeaponType = 'plasma' | 'scatter' | 'railgun';
+import { IslandPlayer } from './island';
+
+export type WeaponType = 'plasma' | 'scatter' | 'railgun' | 'assault' | 'rocket' | 'beam';
 
 export interface WeaponStats {
   id: WeaponType;
@@ -10,10 +12,10 @@ export interface WeaponStats {
   spread: number;
   pellets: number;
   color: string;
-  energyCost: number;
+  cost: number;
 }
 
-export type EnemyType = 'swarmer' | 'berserker' | 'spitter' | 'tank' | 'commander' | 'overlord';
+export type EnemyType = 'swarmer' | 'runner' | 'berserker' | 'spitter' | 'tank' | 'commander' | 'overlord';
 
 export interface EnemyEntity {
   id: string;
@@ -29,32 +31,56 @@ export interface EnemyEntity {
   damage: number;
   color: string;
   attackCooldown: number;
-  targetType: 'core' | 'player';
+  targetType: 'core' | 'structure' | 'player';
   targetId?: string;
   isElite?: boolean;
   isBoss?: boolean;
 }
 
-export interface PlayerEntity {
+export type StructureType =
+  | 'auto_turret'
+  | 'heavy_cannon'
+  | 'laser_turret'
+  | 'slow_field'
+  | 'shield_generator'
+  | 'repair_station'
+  | 'barricade';
+
+export interface StructureDef {
+  type: StructureType;
+  name: string;
+  description: string;
+  cost: number;
+  maxHp: number;
+  range: number;
+  damage: number;
+  fireRate: number; // shots/sec
+  color: string;
+}
+
+export interface DefensiveStructure {
   id: string;
-  username: string;
+  padId: string;
+  type: StructureType;
   x: number;
   y: number;
-  vx: number;
-  vy: number;
   hp: number;
   maxHp: number;
-  shield: number;
-  maxShield: number;
-  weapon: WeaponType;
-  score: number;
-  kills: number;
-  damageDealt: number;
-  isAlive: boolean;
+  level: number;
+  range: number;
+  damage: number;
+  fireRate: number;
+  cooldown: number;
   color: string;
-  turretUnlocked?: boolean;
-  turretAngle?: number;
-  hasSelectedUpgrade?: boolean;
+  builderId?: string;
+}
+
+export interface BuildPad {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+  structureId?: string;
 }
 
 export interface CoreEntity {
@@ -65,6 +91,7 @@ export interface CoreEntity {
   maxHp: number;
   shield: number;
   maxShield: number;
+  level: number;
   pulseTimer: number;
 }
 
@@ -81,15 +108,27 @@ export interface ProjectileEntity {
   color: string;
   pierce: number;
   life: number;
+  isExplosive?: boolean;
+  explosionRadius?: number;
 }
 
-export interface UpgradeOption {
+export interface ResourceDrop {
   id: string;
-  title: string;
-  description: string;
-  icon: string;
-  category: 'offense' | 'defense' | 'core' | 'utility';
-  effect: (player: PlayerEntity, core: CoreEntity) => void;
+  type: 'energy' | 'scrap';
+  amount: number;
+  x: number;
+  y: number;
+  life: number;
+}
+
+export interface PingMarker {
+  id: string;
+  x: number;
+  y: number;
+  type: 'help' | 'defend' | 'build' | 'resource';
+  senderName: string;
+  timestamp: number;
+  life: number;
 }
 
 export interface ParticleEffect {
@@ -113,18 +152,25 @@ export interface DamageText {
   isCrit?: boolean;
 }
 
-export interface VoidHordeState {
-  roomId: string;
+export type IslandPhase = 'peaceful' | 'warning' | 'defense' | 'intermission' | 'victory' | 'defeat';
+
+export interface IslandDefenseState {
   wave: number;
   maxWaves: number;
-  waveState: 'preparing' | 'spawning' | 'intermission' | 'boss' | 'victory' | 'defeat';
-  waveTimer: number;
+  phase: IslandPhase;
+  phaseTimer: number;
+  activeBreaches: Array<{ name: string; x: number; y: number }>;
   core: CoreEntity;
-  players: Record<string, PlayerEntity>;
+  players: Record<string, IslandPlayer>;
+  structures: DefensiveStructure[];
+  buildPads: BuildPad[];
   enemies: EnemyEntity[];
   projectiles: ProjectileEntity[];
+  resourceDrops: ResourceDrop[];
   particles: ParticleEffect[];
   damageTexts: DamageText[];
-  score: number;
+  pings: PingMarker[];
+  teamScore: number;
   totalKills: number;
+  sharedResources: { energy: number; scrap: number };
 }
