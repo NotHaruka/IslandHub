@@ -12,12 +12,12 @@ export const Minimap: React.FC<Props> = ({ state, localPlayerId }) => {
   const scale = mapSize / worldSize;
 
   return (
-    <div className="relative w-[130px] h-[130px] bg-[#0d111d]/90 backdrop-blur-md border border-slate-800 rounded-xl overflow-hidden shadow-2xl p-1 pointer-events-auto">
+    <div className="relative w-[134px] h-[134px] bg-slate-950/60 border border-slate-800/60 backdrop-blur-[2px] overflow-hidden p-0.5 pointer-events-auto shadow-[1px_1px_0px_0px_rgba(0,0,0,0.2)]">
       {/* Background Ocean & Island Mass */}
-      <div className="relative w-full h-full bg-slate-950 rounded-lg overflow-hidden border border-slate-800/80">
-        {/* Island Polygon */}
+      <div className="relative w-full h-full bg-slate-950/40 overflow-hidden border border-slate-900/50">
+        {/* Island Box (Checkered retro grid zone) */}
         <div
-          className="absolute bg-emerald-950/60 border border-emerald-500/30 rounded-2xl"
+          className="absolute bg-emerald-950/40 border border-emerald-500/20"
           style={{
             left: `${150 * scale}px`,
             top: `${150 * scale}px`,
@@ -26,21 +26,21 @@ export const Minimap: React.FC<Props> = ({ state, localPlayerId }) => {
           }}
         />
 
-        {/* Core Dot */}
+        {/* Core Dot (Square central power beacon) */}
         <div
-          className="absolute w-2.5 h-2.5 bg-sky-400 border border-white rounded-full animate-pulse shadow-sm -translate-x-1/2 -translate-y-1/2"
+          className="absolute w-2 h-2 bg-sky-400 border border-white animate-pulse -translate-x-1/2 -translate-y-1/2"
           style={{
             left: `${state.core.x * scale}px`,
             top: `${state.core.y * scale}px`,
           }}
-          title="Island Core"
+          title="Central Core"
         />
 
         {/* Breach Portals */}
         {state.activeBreaches.map((b, idx) => (
           <div
             key={idx}
-            className="absolute w-2 h-2 bg-purple-500 rounded-full animate-ping -translate-x-1/2 -translate-y-1/2"
+            className="absolute w-2 h-2 bg-purple-500 animate-ping -translate-x-1/2 -translate-y-1/2"
             style={{
               left: `${b.x * scale}px`,
               top: `${b.y * scale}px`,
@@ -48,11 +48,11 @@ export const Minimap: React.FC<Props> = ({ state, localPlayerId }) => {
           />
         ))}
 
-        {/* Built Structures */}
+        {/* Built Structures (Square fort pixels) */}
         {state.structures.map((s) => (
           <div
             key={s.id}
-            className="absolute w-1.5 h-1.5 bg-amber-400 rounded-sm -translate-x-1/2 -translate-y-1/2"
+            className="absolute w-1.5 h-1.5 bg-amber-400 border border-amber-600 -translate-x-1/2 -translate-y-1/2"
             style={{
               left: `${s.x * scale}px`,
               top: `${s.y * scale}px`,
@@ -60,12 +60,12 @@ export const Minimap: React.FC<Props> = ({ state, localPlayerId }) => {
           />
         ))}
 
-        {/* Enemies */}
+        {/* Enemies (Red pixel swarm) */}
         {state.enemies.map((e) => (
           <div
             key={e.id}
-            className={`absolute rounded-full -translate-x-1/2 -translate-y-1/2 ${
-              e.isBoss ? 'w-3 h-3 bg-rose-500 animate-ping' : 'w-1 h-1 bg-rose-400'
+            className={`absolute -translate-x-1/2 -translate-y-1/2 ${
+              e.isBoss ? 'w-2.5 h-2.5 bg-rose-500 animate-bounce' : 'w-1 h-1 bg-rose-400'
             }`}
             style={{
               left: `${e.x * scale}px`,
@@ -80,8 +80,8 @@ export const Minimap: React.FC<Props> = ({ state, localPlayerId }) => {
           return (
             <div
               key={p.id}
-              className={`absolute rounded-full -translate-x-1/2 -translate-y-1/2 ${
-                isSelf ? 'w-2.5 h-2.5 bg-emerald-400 border border-white z-10' : 'w-1.5 h-1.5 bg-sky-300'
+              className={`absolute -translate-x-1/2 -translate-y-1/2 ${
+                isSelf ? 'w-2 h-2 bg-emerald-400 border border-white z-10 animate-pulse' : 'w-1.5 h-1.5 bg-sky-300'
               }`}
               style={{
                 left: `${p.x * scale}px`,
@@ -95,7 +95,7 @@ export const Minimap: React.FC<Props> = ({ state, localPlayerId }) => {
         {state.pings.map((ping) => (
           <div
             key={ping.id}
-            className="absolute w-3 h-3 border-2 border-amber-400 rounded-full animate-ping -translate-x-1/2 -translate-y-1/2"
+            className="absolute w-3 h-3 border border-amber-400 animate-ping -translate-x-1/2 -translate-y-1/2"
             style={{
               left: `${ping.x * scale}px`,
               top: `${ping.y * scale}px`,
@@ -103,7 +103,7 @@ export const Minimap: React.FC<Props> = ({ state, localPlayerId }) => {
           />
         ))}
       </div>
-      <div className="absolute bottom-1 right-1 px-1 bg-slate-900/90 text-[9px] font-mono text-slate-400 rounded">
+      <div className="absolute bottom-1 right-1 px-1 bg-slate-900/90 text-[7px] font-pixel-header text-slate-500">
         RADAR
       </div>
     </div>

@@ -36,55 +36,56 @@ export const BuildMenuModal: React.FC<Props> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-2xl bg-[#0d111d] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden p-6 text-slate-100">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-in fade-in duration-150">
+      <div className="relative w-full max-w-2xl bg-[#090d16] border-4 border-slate-700 pixel-shadow p-6 text-slate-100 rounded-none">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
+        <div className="flex items-center justify-between border-b-2 border-slate-800 pb-4 mb-4">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
-              <Hammer className="w-6 h-6" />
+            <div className="p-2 bg-amber-500/10 border-2 border-amber-500 text-amber-400">
+              <Hammer className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold tracking-wide uppercase text-slate-100">
-                {existingStructure ? 'Structure Management' : 'Construct Defense'}
+              <h2 className="font-pixel-header text-sm tracking-wide uppercase text-slate-100">
+                {existingStructure ? 'UNIT PROFILE' : 'CONSTRUCT DEFENSE'}
               </h2>
-              <p className="text-xs text-slate-400">
-                {existingStructure ? 'Upgrade or repair the defensive unit' : 'Select a turret or utility structure for this pad'}
+              <p className="font-pixel-text text-xs text-slate-400 mt-1">
+                {existingStructure ? 'Manage, upgrade, or repair defensive structures' : 'Construct turrets and utility installations'}
               </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+            className="p-1.5 border-2 border-slate-700 text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition cursor-pointer pixel-btn"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Existing Structure Management Mode */}
         {existingStructure ? (
-          <div className="space-y-6">
-            <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl flex items-center justify-between">
+          <div className="space-y-4">
+            <div className="p-4 bg-[#0d1525] border-2 border-slate-800 rounded-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-base font-bold text-slate-100 uppercase">
+                  <span className="font-pixel-header text-xs text-slate-100 uppercase">
                     {STRUCTURE_DEFS[existingStructure.type].name}
                   </span>
-                  <span className="text-xs font-mono font-bold px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-md">
+                  <span className="font-pixel-header text-[8px] px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40">
                     LVL {existingStructure.level}
                   </span>
                 </div>
-                <p className="text-xs text-slate-400 mt-1">{STRUCTURE_DEFS[existingStructure.type].description}</p>
+                <p className="font-pixel-text text-sm text-slate-400 mt-1">{STRUCTURE_DEFS[existingStructure.type].description}</p>
+                
                 {/* Health Bar */}
-                <div className="mt-3 w-64">
-                  <div className="flex justify-between text-[11px] font-mono text-slate-400 mb-1">
-                    <span>STRUCTURE HEALTH</span>
+                <div className="mt-3 w-60">
+                  <div className="flex justify-between font-pixel-header text-[7px] text-slate-400 mb-1">
+                    <span>UNIT HEALTH</span>
                     <span>
                       {Math.round(existingStructure.hp)} / {existingStructure.maxHp}
                     </span>
                   </div>
-                  <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="w-full h-3 bg-slate-950 border border-slate-800 p-0.5">
                     <div
                       className="h-full bg-emerald-500 transition-all duration-300"
                       style={{ width: `${(existingStructure.hp / existingStructure.maxHp) * 100}%` }}
@@ -94,48 +95,48 @@ export const BuildMenuModal: React.FC<Props> = ({
               </div>
 
               {/* Stats Column */}
-              <div className="text-right font-mono text-xs space-y-1 text-slate-300">
+              <div className="font-pixel-header text-[8px] space-y-1.5 text-slate-300 bg-slate-950/60 p-2.5 border border-slate-800/80 min-w-[120px]">
                 <div>
-                  Damage: <span className="text-amber-400 font-bold">{existingStructure.damage}</span>
+                  DMG: <span className="text-amber-400 font-bold">{existingStructure.damage}</span>
                 </div>
                 <div>
-                  Range: <span className="text-sky-400 font-bold">{existingStructure.range}px</span>
+                  RNG: <span className="text-sky-400 font-bold">{existingStructure.range}px</span>
                 </div>
                 <div>
-                  Fire Rate: <span className="text-emerald-400 font-bold">{existingStructure.fireRate}/s</span>
+                  SPD: <span className="text-emerald-400 font-bold">{existingStructure.fireRate}/s</span>
                 </div>
               </div>
             </div>
 
             {/* Upgrade & Repair Buttons */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <button
                 disabled={existingStructure.level >= 3 || scrap < existingStructure.level * 150}
                 onClick={() => {
                   soundManager.playUpgradeBuy();
                   onUpgrade(existingStructure.id);
                 }}
-                className={`flex items-center justify-between p-4 rounded-xl border text-left font-bold transition ${
+                className={`flex items-center justify-between p-4 border-2 text-left font-bold transition pixel-btn rounded-none ${
                   existingStructure.level >= 3
                     ? 'bg-slate-900 border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
                     : scrap >= existingStructure.level * 150
-                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-200 hover:bg-amber-500/20 cursor-pointer active:scale-95'
+                    ? 'bg-amber-950/20 border-amber-500 text-amber-200 hover:bg-amber-900/40 cursor-pointer active:scale-95'
                     : 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
                 }`}
               >
                 <div>
-                  <div className="flex items-center gap-2 text-sm uppercase">
+                  <div className="flex items-center gap-2 font-pixel-header text-[9px] uppercase">
                     <ChevronUp className="w-4 h-4 text-amber-400" />
                     <span>
-                      {existingStructure.level >= 3 ? 'MAX LEVEL' : `Upgrade to Level ${existingStructure.level + 1}`}
+                      {existingStructure.level >= 3 ? 'MAX LEVEL' : `UPGRADE TO L${existingStructure.level + 1}`}
                     </span>
                   </div>
-                  <div className="text-xs font-normal text-slate-400 mt-0.5">
-                    +35% Damage, +15% Range, +150 Max HP
+                  <div className="font-pixel-text text-xs text-slate-400 mt-1">
+                    +35% DMG, +15% Range, +150 HP
                   </div>
                 </div>
                 {existingStructure.level < 3 && (
-                  <span className="font-mono text-xs px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded-md shrink-0">
+                  <span className="font-pixel-header text-[7px] px-2 py-1 bg-amber-500 text-slate-950 rounded-none shrink-0">
                     {existingStructure.level * 150} SCRAP
                   </span>
                 )}
@@ -147,25 +148,25 @@ export const BuildMenuModal: React.FC<Props> = ({
                   soundManager.playRepair();
                   onRepair(existingStructure.id);
                 }}
-                className={`flex items-center justify-between p-4 rounded-xl border text-left font-bold transition ${
+                className={`flex items-center justify-between p-4 border-2 text-left font-bold transition pixel-btn rounded-none ${
                   existingStructure.hp >= existingStructure.maxHp
                     ? 'bg-slate-900 border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
                     : scrap >= 35
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200 hover:bg-emerald-500/20 cursor-pointer active:scale-95'
+                    ? 'bg-emerald-950/20 border-emerald-500 text-emerald-200 hover:bg-emerald-900/40 cursor-pointer active:scale-95'
                     : 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
                 }`}
               >
                 <div>
-                  <div className="flex items-center gap-2 text-sm uppercase">
+                  <div className="flex items-center gap-2 font-pixel-header text-[9px] uppercase">
                     <Wrench className="w-4 h-4 text-emerald-400" />
                     <span>
-                      {existingStructure.hp >= existingStructure.maxHp ? 'FULL HEALTH' : 'Repair Structure'}
+                      {existingStructure.hp >= existingStructure.maxHp ? 'FULL HEALTH' : 'REPAIR'}
                     </span>
                   </div>
-                  <div className="text-xs font-normal text-slate-400 mt-0.5">Restores 100% structure health</div>
+                  <div className="font-pixel-text text-xs text-slate-400 mt-1">Restores unit to 100% capacity</div>
                 </div>
                 {existingStructure.hp < existingStructure.maxHp && (
-                  <span className="font-mono text-xs px-2.5 py-1 bg-emerald-500/20 text-emerald-300 rounded-md shrink-0">
+                  <span className="font-pixel-header text-[7px] px-2 py-1 bg-emerald-500 text-slate-950 rounded-none shrink-0">
                     35 SCRAP
                   </span>
                 )}
@@ -174,7 +175,7 @@ export const BuildMenuModal: React.FC<Props> = ({
           </div>
         ) : (
           /* Build Choice Selection Mode */
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[55vh] overflow-y-auto pr-1">
             {structureTypes.map((sType) => {
               const def = STRUCTURE_DEFS[sType];
               const canAfford = scrap >= def.cost;
@@ -188,34 +189,34 @@ export const BuildMenuModal: React.FC<Props> = ({
                       onBuild(pad.id, sType);
                     }
                   }}
-                  className={`p-3.5 rounded-xl border flex flex-col justify-between transition cursor-pointer ${
+                  className={`p-3 border-2 flex flex-col justify-between transition cursor-pointer pixel-btn rounded-none ${
                     canAfford
-                      ? 'bg-slate-900/90 border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/80 active:scale-98'
-                      : 'bg-slate-950/60 border-slate-900/60 opacity-50 cursor-not-allowed'
+                      ? 'bg-slate-900/90 border-slate-700 hover:border-amber-500 hover:bg-slate-850/80'
+                      : 'bg-[#060a12] border-slate-900 opacity-50 cursor-not-allowed'
                   }`}
                 >
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="font-bold text-sm text-slate-100 uppercase">{def.name}</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-pixel-header text-[9px] text-slate-100 uppercase">{def.name}</span>
                       <span
-                        className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md ${
+                        className={`font-pixel-header text-[7px] px-1.5 py-0.5 ${
                           canAfford
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            ? 'bg-amber-500 text-slate-950'
                             : 'bg-slate-800 text-slate-500'
                         }`}
                       >
                         {def.cost} SCRAP
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 line-clamp-2 mb-3">{def.description}</p>
+                    <p className="font-pixel-text text-xs text-slate-400 leading-tight mb-2">{def.description}</p>
                   </div>
 
-                  <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 border-t border-slate-800/80 pt-2">
+                  <div className="flex items-center justify-between font-pixel-header text-[7px] text-slate-400 border-t border-slate-800/80 pt-2.5">
                     <span>
                       DMG: <strong className="text-slate-200">{def.damage}</strong>
                     </span>
                     <span>
-                      RNG: <strong className="text-sky-300">{def.range}px</strong>
+                      RNG: <strong className="text-sky-300">{def.range}</strong>
                     </span>
                     <span>
                       HP: <strong className="text-emerald-300">{def.maxHp}</strong>

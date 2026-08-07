@@ -30,7 +30,7 @@ export type ServerMessage =
   | { type: 'ping_broadcast'; ping: IslandDefenseState['pings'][0] }
   | {
       type: 'island_event';
-      eventType: 'wave_warning' | 'wave_start' | 'wave_complete' | 'boss_spawn' | 'victory' | 'defeat' | 'core_hit' | 'structure_destroyed';
+      eventType: 'wave_warning' | 'wave_start' | 'wave_complete' | 'boss_spawn' | 'victory' | 'defeat' | 'core_hit' | 'structure_destroyed' | 'cryo_pulse' | 'repair_pulse';
       data?: any;
     }
   | { type: 'error'; message: string };

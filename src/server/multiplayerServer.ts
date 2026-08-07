@@ -60,7 +60,7 @@ export function setupMultiplayerServer(server: HttpServer) {
     { id: 'pad_w3', x: 850, y: 1080, radius: 24 },
     { id: 'pad_w4', x: 850, y: 1320, radius: 24 },
     // Central Plaza Perimeter
-    { id: 'pad_c1', x: 1020, y: 1020, radius: 24 },
+    { id: 'pad_c1', x: 1020, y: 1020, radius: 24, structureId: 'struct_init_1' },
     { id: 'pad_c2', x: 1380, y: 1020, radius: 24 },
     { id: 'pad_c3', x: 1020, y: 1380, radius: 24 },
     { id: 'pad_c4', x: 1380, y: 1380, radius: 24 },
@@ -267,6 +267,8 @@ export function setupMultiplayerServer(server: HttpServer) {
               p.vx = msg.vx;
               p.vy = msg.vy;
               p.facing = msg.facing;
+              p.aimAngle = msg.aimAngle;
+              p.isShooting = msg.shooting;
 
               // Handle Player Shooting
               if (msg.shooting) {
@@ -296,6 +298,7 @@ export function setupMultiplayerServer(server: HttpServer) {
                       life: p.weapon === 'rocket' ? 2.5 : 1.8,
                       isExplosive: p.weapon === 'rocket',
                       explosionRadius: p.weapon === 'rocket' ? 90 : 0,
+                      weaponType: p.weapon as WeaponType,
                     });
                   }
                 }
@@ -356,8 +359,9 @@ export function setupMultiplayerServer(server: HttpServer) {
               sendTo(ws, { type: 'error', message: 'Build pad not found.' });
               return;
             }
-            if (pad.structureId) {
-              sendTo(ws, { type: 'error', message: 'Pad already has a structure.' });
+            const existingStruct = islandState.structures.find((s) => s.padId === pad.id || s.id === pad.structureId);
+            if (existingStruct) {
+              sendTo(ws, { type: 'error', message: 'Pad already has an active structure.' });
               return;
             }
 
@@ -614,12 +618,300 @@ export function setupMultiplayerServer(server: HttpServer) {
   setInterval(() => {
     const now = Date.now();
 
-    // 1. Ambient Bot movement & speech during peaceful phases
-    botConfigs.forEach((bot) => {
-      const p = islandState.players[bot.id];
-      if (p) {
-        p.x += Math.sin(now / 1800 + (bot.id === 'bot_nova' ? 0 : 3)) * 0.6;
-        p.y += Math.cos(now / 1800 + (bot.id === 'bot_nova' ? 0 : 3)) * 0.6;
+    // If game has ended (victory/defeat), freeze simulation but keep broadcasting the final state sync
+    if (islandState.phase === 'victory' || islandState.phase === 'defeat') {
+      broadcastAll({ type: 'island_state_sync', islandState });
+      return;
+    }
+
+    // 1. Active Bot Defenders (Nova and Atlas AI Routine)
+    botConfigs.forEach((botConfig) => {
+      const p = islandState.players[botConfig.id];
+      if (!p) return;
+
+      if (p.isDowned) {
+        return; // Downed bots can't act!
+      }
+
+      const isNova = p.id === 'bot_nova';
+      const isAtlas = p.id === 'bot_atlas';
+
+      // Assign weapons
+      p.weapon = isNova ? 'railgun' : 'scatter';
+
+      if (!p.resources) p.resources = { energy: 100, scrap: 100 };
+
+      let targetX = p.x;
+      let targetY = p.y;
+      let isActing = false;
+      let isShooting = false;
+      let aimAngle = 0;
+
+      // Check for downed teammates to revive
+      let nearestDowned: IslandPlayer | null = null;
+      let nearestDownedDist = Infinity;
+      Object.values(islandState.players).forEach((otherP) => {
+        if (otherP.id !== p.id && otherP.isDowned) {
+          const d = Math.hypot(otherP.x - p.x, otherP.y - p.y);
+          if (d < nearestDownedDist) {
+            nearestDownedDist = d;
+            nearestDowned = otherP;
+          }
+        }
+      });
+
+      if (nearestDowned && nearestDownedDist < 500) {
+        targetX = nearestDowned.x;
+        targetY = nearestDowned.y;
+        isActing = true;
+
+        if (nearestDownedDist < 75) {
+          // Standing close auto-revives
+          targetX = p.x;
+          targetY = p.y;
+          if (Math.random() < 0.012) {
+            const lines = [
+              `Hang tight ${nearestDowned.username}! Restoring your systems!`,
+              `Stay with me, ${nearestDowned.username}! Reviving!`,
+              `Shielding you, ${nearestDowned.username}! Get ready to fight!`,
+            ];
+            p.lastChat = { text: lines[Math.floor(Math.random() * lines.length)], timestamp: Date.now() };
+          }
+        } else {
+          if (Math.random() < 0.005) {
+            p.lastChat = { text: `Rushing to revive ${nearestDowned.username}! Hold on!`, timestamp: Date.now() };
+          }
+        }
+      }
+
+      // Combat Target Logic
+      if (!isActing || (isNova && nearestDownedDist > 180)) {
+        let bestEnemy: EnemyEntity | null = null;
+        let bestEnemyDist = Infinity;
+
+        islandState.enemies.forEach((enemy) => {
+          const distToBot = Math.hypot(enemy.x - p.x, enemy.y - p.y);
+          const distToCore = Math.hypot(enemy.x - islandState.core.x, enemy.y - islandState.core.y);
+          const weight = isNova ? distToBot : distToCore;
+
+          if (weight < bestEnemyDist) {
+            bestEnemyDist = weight;
+            bestEnemy = enemy;
+          }
+        });
+
+        if (bestEnemy) {
+          const enemyDist = Math.hypot(bestEnemy.x - p.x, bestEnemy.y - p.y);
+          aimAngle = Math.atan2(bestEnemy.y - p.y, bestEnemy.x - p.x);
+
+          if (isNova) {
+            if (enemyDist > 260) {
+              targetX = bestEnemy.x;
+              targetY = bestEnemy.y;
+            } else if (enemyDist < 120) {
+              targetX = p.x - Math.cos(aimAngle) * 140;
+              targetY = p.y - Math.sin(aimAngle) * 140;
+            } else {
+              targetX = p.x;
+              targetY = p.y;
+            }
+            isShooting = enemyDist < 550;
+            isActing = true;
+
+            if (isShooting && Math.random() < 0.003) {
+              p.lastChat = { text: `Target locked! Preparing Railgun blast!`, timestamp: Date.now() };
+            }
+          } else {
+            if (enemyDist > 140) {
+              targetX = bestEnemy.x;
+              targetY = bestEnemy.y;
+            } else {
+              targetX = p.x;
+              targetY = p.y;
+            }
+            isShooting = enemyDist < 260;
+            isActing = true;
+
+            if (isShooting && Math.random() < 0.003) {
+              p.lastChat = { text: `Eat shotgun spray, void scum!`, timestamp: Date.now() };
+            }
+          }
+        }
+      }
+
+      // Atlas Resource Harvesting and Structural Repairs
+      if (!isActing && isAtlas) {
+        let bestDrop: ResourceDrop | null = null;
+        let bestDropDist = Infinity;
+        islandState.resourceDrops.forEach((drop) => {
+          const dist = Math.hypot(drop.x - p.x, drop.y - p.y);
+          if (dist < bestDropDist) {
+            bestDropDist = dist;
+            bestDrop = drop;
+          }
+        });
+
+        let damagedStruct: DefensiveStructure | null = null;
+        let bestStructDist = Infinity;
+        islandState.structures.forEach((s) => {
+          if (s.hp < s.maxHp) {
+            const dist = Math.hypot(s.x - p.x, s.y - p.y);
+            if (dist < bestStructDist) {
+              bestStructDist = dist;
+              damagedStruct = s;
+            }
+          }
+        });
+
+        if (bestDrop && bestDropDist < 450) {
+          targetX = bestDrop.x;
+          targetY = bestDrop.y;
+          isActing = true;
+          if (Math.random() < 0.005) {
+            p.lastChat = { text: `Grabbing uncollected ${bestDrop.type} cell!`, timestamp: Date.now() };
+          }
+        } else if (damagedStruct && bestStructDist < 400 && islandState.sharedResources.scrap >= 35) {
+          targetX = damagedStruct.x;
+          targetY = damagedStruct.y;
+          isActing = true;
+
+          if (bestStructDist < 50) {
+            targetX = p.x;
+            targetY = p.y;
+            islandState.sharedResources.scrap -= 35;
+            damagedStruct.hp = damagedStruct.maxHp;
+
+            islandState.damageTexts.push({
+              id: `dt_${Date.now()}_${Math.random()}`,
+              x: damagedStruct.x,
+              y: damagedStruct.y - 30,
+              text: 'REPAIRED BY ATLAS!',
+              color: '#34d399',
+              life: 1.5,
+            });
+
+            p.lastChat = { text: `Rebuilt damaged ${damagedStruct.type}! All systems green!`, timestamp: Date.now() };
+          }
+        }
+      }
+
+      // Idle movement & tips
+      if (!isActing) {
+        targetX = 1200 + Math.sin(now / 2200 + (isNova ? 0 : 3.5)) * 140;
+        targetY = 1200 + Math.cos(now / 2200 + (isNova ? 0 : 3.5)) * 140;
+
+        if (Math.random() < 0.002) {
+          const lines = isNova ? [
+            'Tip: Construct Shield Generators nearby to absorb 70% of structure damage!',
+            'Tip: The Cryo Shockwave Pusher slams enemies away with massive physical force.',
+            'Need better firepower? Access the Depot using [B] to swap weapons!',
+          ] : [
+            'Stand close to downed allies to automatically revive them!',
+            'The Shield Generator continuously regenerates the shields of nearby players.',
+            'Let\'s build more barricades to guide the swarm into our auto-turrets!',
+          ];
+          p.lastChat = { text: lines[Math.floor(Math.random() * lines.length)], timestamp: Date.now() };
+        }
+      }
+
+      // Smooth steering movement
+      const speed = 160;
+      const dx = targetX - p.x;
+      const dy = targetY - p.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist > 6) {
+        const vx = (dx / dist) * speed;
+        const vy = (dy / dist) * speed;
+        p.vx = vx;
+        p.vy = vy;
+        p.x += vx * dt;
+        p.y += vy * dt;
+
+        if (Math.abs(vx) > Math.abs(vy)) {
+          p.facing = vx > 0 ? 'right' : 'left';
+        } else {
+          p.facing = vy > 0 ? 'down' : 'up';
+        }
+      } else {
+        p.vx = 0;
+        p.vy = 0;
+      }
+
+      if (!isShooting && dist > 6) {
+        aimAngle = Math.atan2(dy, dx);
+      }
+      p.aimAngle = aimAngle;
+      p.isShooting = isShooting;
+
+      // Shooting trigger
+      if (isShooting) {
+        const wStats = WEAPON_DEFS[p.weapon as WeaponType] || WEAPON_DEFS.plasma;
+        const cooldownMs = 1000 / wStats.fireRate;
+        const lastBotShotTime = (p as any).lastShotTime || 0;
+
+        if (now - lastBotShotTime >= cooldownMs) {
+          (p as any).lastShotTime = now;
+
+          for (let i = 0; i < wStats.pellets; i++) {
+            const angleOffset = (Math.random() - 0.5) * wStats.spread;
+            const finalAngle = aimAngle + angleOffset;
+
+            islandState.projectiles.push({
+              id: `proj_${now}_bot_${Math.random().toString(36).substring(2, 6)}`,
+              ownerId: p.id,
+              isEnemy: false,
+              x: p.x,
+              y: p.y,
+              vx: Math.cos(finalAngle) * wStats.projectileSpeed,
+              vy: Math.sin(finalAngle) * wStats.projectileSpeed,
+              damage: Math.round(wStats.damage * 0.8),
+              radius: p.weapon === 'rocket' ? 8 : p.weapon === 'railgun' ? 6 : 4,
+              color: wStats.color,
+              pierce: p.weapon === 'railgun' ? 4 : 1,
+              life: p.weapon === 'rocket' ? 2.5 : 1.8,
+              isExplosive: p.weapon === 'rocket',
+              explosionRadius: p.weapon === 'rocket' ? 90 : 0,
+              weaponType: p.weapon as WeaponType,
+            });
+          }
+        }
+      }
+    });
+
+    // 2. Automated Downed Teammates Reviving Tick
+    Object.values(islandState.players).forEach((downedP) => {
+      if (downedP.isDowned) {
+        let hasHelper = false;
+        Object.values(islandState.players).forEach((helperP) => {
+          if (!helperP.isDowned && helperP.id !== downedP.id) {
+            const dist = Math.hypot(helperP.x - downedP.x, helperP.y - downedP.y);
+            if (dist < 85) {
+              hasHelper = true;
+            }
+          }
+        });
+
+        if (hasHelper) {
+          downedP.reviveProgress = (downedP.reviveProgress || 0) + 30 * dt;
+          if (downedP.reviveProgress >= 100) {
+            downedP.isDowned = false;
+            downedP.hp = Math.round(downedP.maxHp * 0.5);
+            downedP.shield = downedP.maxShield;
+            downedP.reviveProgress = 0;
+
+            islandState.damageTexts.push({
+              id: `dt_${Date.now()}_${Math.random()}`,
+              x: downedP.x,
+              y: downedP.y - 30,
+              text: 'REVIVED!',
+              color: '#34d399',
+              life: 1.5,
+            });
+          }
+        } else {
+          downedP.reviveProgress = Math.max(0, (downedP.reviveProgress || 0) - 15 * dt);
+        }
       }
     });
 
@@ -804,27 +1096,177 @@ export function setupMultiplayerServer(server: HttpServer) {
 
     // 4. Update Defensive Structures AI & Attacks
     islandState.structures.forEach((struct) => {
-      struct.cooldown = Math.max(0, struct.cooldown - dt);
+      // Cooldown decrement for non-laser types (laser uses cooldown to track focus lock time)
+      if (struct.type !== 'laser_turret') {
+        struct.cooldown = Math.max(0, struct.cooldown - dt);
+      }
 
       if (struct.type === 'repair_station') {
         if (struct.cooldown <= 0) {
           struct.cooldown = 1.0;
+          let repairedAny = false;
           // Pulse repair to nearby damaged structures and Core
           islandState.structures.forEach((other) => {
             const dist = Math.hypot(other.x - struct.x, other.y - struct.y);
-            if (dist < struct.range && other.hp < other.maxHp) {
-              other.hp = Math.min(other.maxHp, other.hp + 30);
+            if (dist < struct.range && other.hp < other.maxHp && other.id !== struct.id) {
+              other.hp = Math.min(other.maxHp, other.hp + 40);
+              repairedAny = true;
             }
           });
 
           const coreDist = Math.hypot(islandState.core.x - struct.x, islandState.core.y - struct.y);
           if (coreDist < struct.range && islandState.core.hp < islandState.core.maxHp) {
-            islandState.core.hp = Math.min(islandState.core.maxHp, islandState.core.hp + 20);
+            islandState.core.hp = Math.min(islandState.core.maxHp, islandState.core.hp + 30);
+            repairedAny = true;
+          }
+
+          if (repairedAny) {
+            // Trigger visual repair pulse on client
+            broadcastAll({
+              type: 'island_event',
+              eventType: 'repair_pulse',
+              data: { structId: struct.id, x: struct.x, y: struct.y, range: struct.range }
+            });
           }
         }
       } else if (struct.type === 'slow_field') {
-        // Slow field applies aura directly to nearby enemies in distance checks
-      } else if (struct.type === 'auto_turret' || struct.type === 'heavy_cannon' || struct.type === 'laser_turret') {
+        // Reworked Cryo Shockwave Pusher - Downslam with heavy pushback!
+        if (struct.cooldown <= 0) {
+          struct.cooldown = 1.0 / struct.fireRate; // 2.0s cooldown
+          let hitCount = 0;
+          islandState.enemies.forEach((enemy) => {
+            const dist = Math.hypot(enemy.x - struct.x, enemy.y - struct.y);
+            if (dist < struct.range) {
+              enemy.hp -= struct.damage;
+              hitCount++;
+              
+              // Apply massive outwards physical slam force!
+              const kAngle = Math.atan2(enemy.y - struct.y, enemy.x - struct.x);
+              enemy.x += Math.cos(kAngle) * 110;
+              enemy.y += Math.sin(kAngle) * 110;
+            }
+          });
+
+          // Always trigger visual freeze slam shockwave ripple!
+          broadcastAll({
+            type: 'island_event',
+            eventType: 'cryo_pulse',
+            data: { structId: struct.id, x: struct.x, y: struct.y, range: struct.range }
+          });
+        }
+      } else if (struct.type === 'shield_generator') {
+        // Shield Generator - Constantly recharges shields of nearby active players
+        Object.values(islandState.players).forEach((p) => {
+          if (!p.isDowned) {
+            const dist = Math.hypot(p.x - struct.x, p.y - struct.y);
+            if (dist < struct.range) {
+              p.shield = Math.min(p.maxShield, p.shield + 20 * dt);
+            }
+          }
+        });
+
+        // Trigger visual defense pulse indicator
+        if (struct.cooldown <= 0) {
+          struct.cooldown = 2.0;
+          broadcastAll({
+            type: 'island_event',
+            eventType: 'repair_pulse',
+            data: { structId: struct.id, x: struct.x, y: struct.y, range: struct.range }
+          });
+        }
+      } else if (struct.type === 'laser_turret') {
+        // Find a target (maintain lock-on if possible)
+        let target: EnemyEntity | null = null;
+        if (struct.targetId) {
+          const curr = islandState.enemies.find(e => e.id === struct.targetId);
+          if (curr) {
+            const dist = Math.hypot(curr.x - struct.x, curr.y - struct.y);
+            if (dist < struct.range) {
+              target = curr;
+            }
+          }
+        }
+
+        // Search for nearest enemy if no locked target
+        if (!target && islandState.enemies.length > 0) {
+          let minDist = struct.range;
+          islandState.enemies.forEach((e) => {
+            const dist = Math.hypot(e.x - struct.x, e.y - struct.y);
+            if (dist < minDist) {
+              minDist = dist;
+              target = e;
+            }
+          });
+        }
+
+        if (target) {
+          struct.targetId = target.id;
+          // Increment focus time in struct.cooldown
+          if (!struct.cooldown || struct.cooldown < 0) {
+            struct.cooldown = 0;
+          }
+          struct.cooldown += dt;
+
+          // Focus damage multiplier starts at 1.0x and ramps up to 2.2x after 2.5s of continuous locking
+          const focusMult = Math.min(2.2, 1.0 + struct.cooldown * 0.48);
+          // Calculate tick damage
+          const dps = struct.damage * struct.fireRate; // 45 * 10 = 450 dps
+          const dmg = dps * dt * focusMult;
+          target.hp -= dmg;
+
+          // Attribute damage to builder
+          const builder = struct.builderId ? islandState.players[struct.builderId] : null;
+          if (builder) builder.damageDealt += dmg;
+
+          // Spawn high-temp laser sparks
+          if (Math.random() < 0.35) {
+            islandState.particles.push({
+              x: target.x + (Math.random() * 20 - 10),
+              y: target.y + (Math.random() * 20 - 10),
+              vx: (Math.random() * 80 - 40),
+              vy: (Math.random() * 80 - 40),
+              color: '#f43f5e',
+              radius: 2 + Math.random() * 2.5,
+              life: 0.3,
+              maxLife: 0.3
+            });
+          }
+
+          if (target.hp <= 0) {
+            if (builder) {
+              builder.kills += 1;
+              builder.score += target.isBoss ? 3000 : target.isElite ? 600 : 120;
+            }
+            islandState.teamScore += target.isBoss ? 3000 : target.isElite ? 600 : 120;
+            islandState.totalKills += 1;
+
+            islandState.resourceDrops.push({
+              id: `res_${Date.now()}_${Math.random()}`,
+              type: Math.random() < 0.5 ? 'energy' : 'scrap',
+              amount: target.isBoss ? 200 : target.isElite ? 80 : 25,
+              x: target.x,
+              y: target.y,
+              life: 30.0,
+            });
+
+            if (target.isBoss) {
+              islandState.phase = 'victory';
+              broadcastAll({ type: 'island_event', eventType: 'victory' });
+            }
+
+            // Remove target from enemies list
+            const eIndex = islandState.enemies.findIndex(e => e.id === target!.id);
+            if (eIndex !== -1) {
+              islandState.enemies.splice(eIndex, 1);
+            }
+            struct.targetId = undefined;
+            struct.cooldown = 0;
+          }
+        } else {
+          struct.targetId = undefined;
+          struct.cooldown = 0;
+        }
+      } else if (struct.type === 'auto_turret' || struct.type === 'heavy_cannon') {
         if (struct.cooldown <= 0 && islandState.enemies.length > 0) {
           // Find nearest enemy in range
           let target: EnemyEntity | null = null;
@@ -840,24 +1282,49 @@ export function setupMultiplayerServer(server: HttpServer) {
 
           if (target) {
             struct.cooldown = 1 / struct.fireRate;
-            const aimAngle = Math.atan2((target as EnemyEntity).y - struct.y, (target as EnemyEntity).x - struct.x);
+            const aimAngle = Math.atan2(target.y - struct.y, target.x - struct.x);
 
-            islandState.projectiles.push({
-              id: `turret_proj_${Date.now()}_${Math.random()}`,
-              ownerId: struct.id,
-              isEnemy: false,
-              x: struct.x,
-              y: struct.y,
-              vx: Math.cos(aimAngle) * 750,
-              vy: Math.sin(aimAngle) * 750,
-              damage: struct.damage,
-              radius: struct.type === 'heavy_cannon' ? 7 : 4,
-              color: struct.color,
-              pierce: struct.type === 'heavy_cannon' ? 2 : 1,
-              life: 1.5,
-              isExplosive: struct.type === 'heavy_cannon',
-              explosionRadius: struct.type === 'heavy_cannon' ? 80 : 0,
-            });
+            if (struct.type === 'auto_turret') {
+              // Dual alternating rapid barrels
+              const isRightBarrel = Math.floor(Date.now() / 150) % 2 === 0;
+              const perpAngle = aimAngle + Math.PI / 2;
+              const bOffset = isRightBarrel ? 8 : -8;
+              const bx = struct.x + Math.cos(perpAngle) * bOffset;
+              const by = struct.y + Math.sin(perpAngle) * bOffset;
+
+              islandState.projectiles.push({
+                id: `turret_proj_${Date.now()}_${Math.random()}`,
+                ownerId: struct.id,
+                isEnemy: false,
+                x: bx,
+                y: by,
+                vx: Math.cos(aimAngle) * 950,
+                vy: Math.sin(aimAngle) * 950,
+                damage: struct.damage,
+                radius: 4.5,
+                color: struct.color,
+                pierce: 1,
+                life: 1.2,
+              });
+            } else if (struct.type === 'heavy_cannon') {
+              // Devastating heavy knockback artillery cannon
+              islandState.projectiles.push({
+                id: `turret_proj_${Date.now()}_${Math.random()}`,
+                ownerId: struct.id,
+                isEnemy: false,
+                x: struct.x,
+                y: struct.y - 12,
+                vx: Math.cos(aimAngle) * 550,
+                vy: Math.sin(aimAngle) * 550,
+                damage: struct.damage,
+                radius: 11,
+                color: struct.color,
+                pierce: 3,
+                life: 2.0,
+                isExplosive: true,
+                explosionRadius: 90,
+              });
+            }
           }
         }
       }
@@ -868,16 +1335,8 @@ export function setupMultiplayerServer(server: HttpServer) {
       const enemy = islandState.enemies[i];
       enemy.attackCooldown = Math.max(0, enemy.attackCooldown - dt);
 
-      // Check Slow Field modifiers
+      // Speed is unmodified by Cryo now, since it acts as a physical Pusher!
       let currentSpeed = enemy.speed;
-      islandState.structures.forEach((s) => {
-        if (s.type === 'slow_field') {
-          const sDist = Math.hypot(enemy.x - s.x, enemy.y - s.y);
-          if (sDist < s.range) {
-            currentSpeed *= 0.5;
-          }
-        }
-      });
 
       // Target determination
       let targetX = islandState.core.x;
@@ -937,7 +1396,37 @@ export function setupMultiplayerServer(server: HttpServer) {
         const sDist = Math.hypot(enemy.x - struct.x, enemy.y - struct.y);
         if (sDist < enemy.radius + 24 && enemy.attackCooldown <= 0) {
           enemy.attackCooldown = 0.9;
-          struct.hp -= enemy.damage;
+
+          // Check for nearby active Shield Generator to absorb 70% of structure damage
+          let shieldGen: DefensiveStructure | null = null;
+          if (struct.type !== 'shield_generator') {
+            islandState.structures.forEach((other) => {
+              if (other.type === 'shield_generator' && other.hp > 0) {
+                const sGenDist = Math.hypot(struct.x - other.x, struct.y - other.y);
+                if (sGenDist < other.range) {
+                  shieldGen = other;
+                }
+              }
+            });
+          }
+
+          if (shieldGen) {
+            const absorbed = Math.round(enemy.damage * 0.7);
+            const taken = enemy.damage - absorbed;
+            shieldGen.hp -= absorbed;
+            struct.hp -= taken;
+
+            islandState.damageTexts.push({
+              id: `dt_${Date.now()}_${Math.random()}`,
+              x: struct.x,
+              y: struct.y - 20,
+              text: '🛡️ BLOCKED!',
+              color: '#a78bfa',
+              life: 0.8,
+            });
+          } else {
+            struct.hp -= enemy.damage;
+          }
 
           if (struct.hp <= 0) {
             const pad = islandState.buildPads.find((p) => p.id === struct.padId);
@@ -947,7 +1436,13 @@ export function setupMultiplayerServer(server: HttpServer) {
         }
       });
 
-      // Filter destroyed structures
+      // Filter destroyed structures and clear pad structure references
+      islandState.structures.forEach((s) => {
+        if (s.hp <= 0) {
+          const pad = islandState.buildPads.find((p) => p.id === s.padId || p.structureId === s.id);
+          if (pad) pad.structureId = undefined;
+        }
+      });
       islandState.structures = islandState.structures.filter((s) => s.hp > 0);
 
       // Enemy Attacks Players
@@ -956,13 +1451,51 @@ export function setupMultiplayerServer(server: HttpServer) {
         const pDist = Math.hypot(enemy.x - p.x, enemy.y - p.y);
         if (pDist < enemy.radius + 18 && enemy.attackCooldown <= 0) {
           enemy.attackCooldown = 0.8;
-          if (p.shield > 0) {
-            p.shield = Math.max(0, p.shield - enemy.damage);
+
+          // Check for nearby active Shield Generator to absorb 70% of player damage
+          let shieldGen: DefensiveStructure | null = null;
+          islandState.structures.forEach((other) => {
+            if (other.type === 'shield_generator' && other.hp > 0) {
+              const pGenDist = Math.hypot(p.x - other.x, p.y - other.y);
+              if (pGenDist < other.range) {
+                shieldGen = other;
+              }
+            }
+          });
+
+          const activeDmg = enemy.damage;
+          if (shieldGen) {
+            const absorbed = Math.round(activeDmg * 0.7);
+            const taken = activeDmg - absorbed;
+            shieldGen.hp -= absorbed;
+
+            if (p.shield > 0) {
+              p.shield = Math.max(0, p.shield - taken);
+            } else {
+              p.hp = Math.max(0, p.hp - taken);
+              if (p.hp <= 0) {
+                p.isDowned = true;
+                p.reviveProgress = 0;
+              }
+            }
+
+            islandState.damageTexts.push({
+              id: `dt_${Date.now()}_${Math.random()}`,
+              x: p.x,
+              y: p.y - 20,
+              text: '🛡️ SHIELDED!',
+              color: '#8b5cf6',
+              life: 0.8,
+            });
           } else {
-            p.hp = Math.max(0, p.hp - enemy.damage);
-            if (p.hp <= 0) {
-              p.isDowned = true;
-              p.reviveProgress = 0;
+            if (p.shield > 0) {
+              p.shield = Math.max(0, p.shield - activeDmg);
+            } else {
+              p.hp = Math.max(0, p.hp - activeDmg);
+              if (p.hp <= 0) {
+                p.isDowned = true;
+                p.reviveProgress = 0;
+              }
             }
           }
         }
@@ -1005,12 +1538,20 @@ export function setupMultiplayerServer(server: HttpServer) {
               isCrit,
             });
 
-            // Handle Explosive Rockets
+            // Handle Explosive Rockets / Artillery Cannon with physical knockback
             if (proj.isExplosive && proj.explosionRadius) {
               islandState.enemies.forEach((otherE) => {
                 const splashDist = Math.hypot(otherE.x - proj.x, otherE.y - proj.y);
-                if (splashDist < proj.explosionRadius! && otherE.id !== enemy.id) {
-                  otherE.hp -= Math.round(dmg * 0.7);
+                if (splashDist < proj.explosionRadius!) {
+                  if (otherE.id !== enemy.id) {
+                    otherE.hp -= Math.round(dmg * 0.7);
+                  }
+                  // Satisfying physical shockwave knockback (pushes enemies away from explosion center)
+                  const kAngle = Math.atan2(otherE.y - proj.y, otherE.x - proj.x);
+                  const forceRatio = (proj.explosionRadius! - splashDist) / proj.explosionRadius!;
+                  const pushDistance = forceRatio * 50; // physically shove back up to 50px
+                  otherE.x += Math.cos(kAngle) * pushDistance;
+                  otherE.y += Math.sin(kAngle) * pushDistance;
                 }
               });
             }
@@ -1085,6 +1626,19 @@ export function setupMultiplayerServer(server: HttpServer) {
       const ping = islandState.pings[i];
       ping.life -= dt;
       if (ping.life <= 0) islandState.pings.splice(i, 1);
+    }
+
+    // 8b. Decay Particles (Sparks generated by laser turrets)
+    if (islandState.particles) {
+      for (let i = islandState.particles.length - 1; i >= 0; i--) {
+        const part = islandState.particles[i];
+        part.x += part.vx * dt;
+        part.y += part.vy * dt;
+        part.life -= dt;
+        if (part.life <= 0) {
+          islandState.particles.splice(i, 1);
+        }
+      }
     }
 
     // 9. Sync full island state to clients at 30 Hz

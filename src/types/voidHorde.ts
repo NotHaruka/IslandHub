@@ -73,6 +73,7 @@ export interface DefensiveStructure {
   cooldown: number;
   color: string;
   builderId?: string;
+  targetId?: string;
 }
 
 export interface BuildPad {
@@ -110,6 +111,7 @@ export interface ProjectileEntity {
   life: number;
   isExplosive?: boolean;
   explosionRadius?: number;
+  weaponType?: WeaponType;
 }
 
 export interface ResourceDrop {

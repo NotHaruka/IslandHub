@@ -28,6 +28,7 @@ export default function App() {
   });
 
   const [islandState, setIslandState] = useState<IslandDefenseState | null>(null);
+  const [spriteTheme, setSpriteTheme] = useState<string>(() => localStorage.getItem('sprite_theme') || 'classic');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -55,6 +56,11 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+        return;
+      }
+      if (e.code === 'KeyB') {
+        setShowDepot((prev) => !prev);
+        soundManager.playChatMessage();
         return;
       }
       keysPressed.current[e.code] = true;
@@ -184,6 +190,7 @@ export default function App() {
             keysPressed={keysState}
             joystickVel={joystickVel}
             touchShooting={touchShooting}
+            theme={spriteTheme}
           />
 
           <IslandHUD
@@ -194,6 +201,14 @@ export default function App() {
             onOpenPingMenu={() =>
               networkClient.pingLocation(localPlayer?.x || 1200, localPlayer?.y || 1200, 'defend')
             }
+            onOpenCustomizer={() => setShowAvatarCustomizer(true)}
+            isMuted={isAudioMuted}
+            onToggleMute={toggleMute}
+            theme={spriteTheme}
+            onChangeTheme={(newTheme) => {
+              setSpriteTheme(newTheme);
+              localStorage.setItem('sprite_theme', newTheme);
+            }}
           />
 
           <IslandChat
@@ -203,7 +218,7 @@ export default function App() {
           />
 
           {/* Minimap Radar */}
-          <div className="fixed bottom-4 right-4 z-30">
+          <div className="fixed bottom-20 right-4 z-30">
             <Minimap state={islandState} localPlayerId={localPlayerId} />
           </div>
 
@@ -212,7 +227,9 @@ export default function App() {
             <BuildMenuModal
               pad={selectedPad.pad}
               existingStructure={
-                islandState.structures.find((s) => s.id === selectedPad.pad.structureId) || null
+                islandState.structures.find(
+                  (s) => s.padId === selectedPad.pad.id || s.id === selectedPad.pad.structureId
+                ) || null
               }
               scrap={islandState.sharedResources.scrap}
               onBuild={handleBuildStructure}
@@ -246,25 +263,6 @@ export default function App() {
           )}
         </>
       )}
-
-      {/* Top Controls: Profile Customizer & Mute */}
-      <div className="fixed top-4 right-4 z-40 flex items-center gap-2 pointer-events-auto">
-        <button
-          onClick={() => setShowAvatarCustomizer(!showAvatarCustomizer)}
-          className="p-2.5 bg-[#0d111d]/90 hover:bg-slate-800 backdrop-blur-md border border-slate-800 rounded-xl text-slate-300 transition shadow-lg cursor-pointer"
-          title="Customize Avatar Profile"
-        >
-          <Sparkles className="w-4 h-4 text-amber-400" />
-        </button>
-
-        <button
-          onClick={toggleMute}
-          className="p-2.5 bg-[#0d111d]/90 hover:bg-slate-800 backdrop-blur-md border border-slate-800 rounded-xl text-slate-300 transition shadow-lg cursor-pointer"
-          title={isAudioMuted ? 'Unmute Audio' : 'Mute Audio'}
-        >
-          {isAudioMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
-        </button>
-      </div>
 
       {/* Avatar Customizer Modal */}
       {showAvatarCustomizer && (

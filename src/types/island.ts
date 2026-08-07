@@ -27,6 +27,8 @@ export interface IslandPlayer {
   isAlive: boolean;
   isDowned?: boolean;
   reviveProgress?: number; // 0 to 100
+  aimAngle?: number;
+  isShooting?: boolean;
   lastChat?: { text: string; timestamp: number };
   currentEmote?: { symbol: string; label: string; timestamp: number };
 }
